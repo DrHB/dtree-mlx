@@ -11,15 +11,15 @@ This repo measures what each method delivers on the same hardware, same prompt s
 
 ## Speed
 
-Single-prompt head-to-head on Apple M2 Max (32 GB), Qwen3-4B-bf16 target + z-lab Qwen3-4B-DFlash draft. `temperature=0`, `max_new_tokens=512`, `speculative_tokens=16`, `tree_budget=24`, 1 warmup pass. Prompt is a gsm8k-style word problem. For single-prompt numbers, use the single-mode CLI below so warmup is explicit and mode-order bias is avoided.
+Single-prompt head-to-head on Apple M2 Max (32 GB), Qwen3-4B-bf16 target + z-lab Qwen3-4B-DFlash draft. `temperature=0`, `max_new_tokens=512`, `speculative_tokens=16`, `tree_budget=24`, 1 warmup pass. DFlash below uses exact `verify_mode=parallel-greedy-argmax` on Qwen3, which is materially faster than the default exact `parallel-replay` verifier at `temperature=0`. Prompt is a gsm8k-style word problem. For single-prompt numbers, use the single-mode CLI below so warmup is explicit and mode-order bias is avoided.
 
 | Method | Gen TPS | End-to-end TPS | Mean accept length | vs Vanilla |
 |---|---:|---:|---:|---:|
-| Vanilla (MLX-LM)   | 39.83 | 32.93 | — | 1.00× |
-| DFlash             | 61.76 | 55.52 | 5.90 | **1.55×** |
-| DTree              | 58.67 | 56.50 | 6.53 | 1.47× |
+| Vanilla (MLX-LM)   | 35.13 | 33.41 | — | 1.00× |
+| DFlash (`parallel-greedy-argmax`) | 61.71 | 59.33 | 5.90 | 1.78× |
+| DTree              | 62.16 | 59.73 | 6.53 | **1.79×** |
 
-Both spec-decode methods comfortably beat vanilla. On this prompt, DTree still accepts ~10% more tokens per step than DFlash (6.53 vs 5.90). DFlash keeps a small edge in raw generation TPS, but after the verifier-path optimizations DTree is now slightly ahead end-to-end on this workload (56.50 vs 55.52 TPS). The remaining optimization target is still verifier cost: tree verification dominates DTree decode time, especially once `tree_budget` grows past 24.
+Both spec-decode methods comfortably beat vanilla. On this prompt, DTree still accepts ~10% more tokens per step than DFlash (6.53 vs 5.90), and with the current Qwen3 verifier paths both methods land at roughly the same throughput on this M2 Max. The important caveat is that the DFlash baseline is sensitive to verifier mode: exact `parallel-greedy-argmax` is much faster than exact `parallel-replay` on Qwen3 at `temperature=0`. The remaining optimization target for DTree is still verifier cost: tree verification dominates DTree decode time, especially once `tree_budget` grows past 24.
 
 Reproduce:
 
@@ -30,7 +30,8 @@ Please reason step by step, and put your final answer within \\boxed{}."
 
 # DFlash
 uv run dtree-mlx --prompt "$PROMPT" --decode-mode dflash \
-    --max-new-tokens 512 --speculative-tokens 16 --warmup-runs 1
+    --max-new-tokens 512 --speculative-tokens 16 \
+    --verify-mode parallel-greedy-argmax --warmup-runs 1
 
 # DTree
 uv run dtree-mlx --prompt "$PROMPT" --decode-mode dtree \
@@ -92,7 +93,7 @@ uv run dtree-mlx-compare \
     --tree-budget 24
 ```
 
-`dtree-mlx-compare` alternates the DFlash/DTree measurement order across prompts to reduce second-run bias. For a single prompt, prefer the per-mode `dtree-mlx` commands above.
+`dtree-mlx-compare` alternates the DFlash/DTree measurement order across prompts to reduce second-run bias. For a single prompt, prefer the per-mode `dtree-mlx` commands above. If you want the faster exact DFlash baseline on Qwen3 at `temperature=0`, pass `--verify-mode parallel-greedy-argmax`.
 
 Supported datasets: `gsm8k`, `humaneval`, `math500`, `mbpp`, `mt-bench`.
 
