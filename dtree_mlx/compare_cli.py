@@ -123,6 +123,13 @@ def main() -> None:
         draft_quant_group_size=args.draft_quant_group_size,
         seed=args.seed,
     )
+    if not runner.target.supports_tree_verification():
+        raise SystemExit(
+            "dtree-mlx-compare requires a target family with DTree support. "
+            f"Loaded family={runner.target.adapter.family!r}. "
+            "Use dtree-mlx --decode-mode dflash plus dtree-mlx-bench for plain "
+            "baseline benchmarking on this target."
+        )
 
     mode_results: dict[str, list[dict[str, float]]] = {"dflash": [], "dtree": []}
     for warmup_idx, prompt in enumerate(warmup_prompts, start=1):

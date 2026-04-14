@@ -6,6 +6,8 @@ without an Apple Silicon GPU and without a ~12 GB model download.
 from __future__ import annotations
 
 import sys
+from pathlib import Path
+from types import SimpleNamespace
 
 
 def test_public_api_importable():
@@ -102,3 +104,41 @@ def test_compare_cli_parses_target_quantization_flags():
         assert args.target_quant_group_size == 64
     finally:
         sys.argv = saved_argv
+
+
+def test_qwen35_adapter_is_registered():
+    from dtree_mlx import adapter_for_model_type
+
+    assert adapter_for_model_type("qwen3_5") is not None
+
+
+def test_generator_auto_mask_uses_target_family(monkeypatch):
+    from dtree_mlx import api
+
+    def build_generator(family: str) -> str:
+        fake_target = SimpleNamespace(
+            adapter=SimpleNamespace(family=family),
+            model=object(),
+            resolved_model_path=Path("/tmp/target"),
+        )
+        fake_draft = SimpleNamespace(
+            attention_mask_mode=None,
+            block_size=16,
+            target_layer_ids=[],
+        )
+        monkeypatch.setattr(api, "load_target_model", lambda target_model: fake_target)
+        monkeypatch.setattr(
+            api,
+            "load_draft_model",
+            lambda draft_model: (fake_draft, Path("/tmp/draft")),
+        )
+        monkeypatch.setattr(
+            api,
+            "maybe_quantize_draft_model",
+            lambda draft, bits, group_size: {},
+        )
+        generator = api.DFlashGenerator()
+        return generator.draft_attention_mask
+
+    assert build_generator("qwen3") == "none"
+    assert build_generator("qwen3_5") == "none"

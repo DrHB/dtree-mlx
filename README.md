@@ -10,6 +10,11 @@ Today the repo is focused on one pair:
 - target: `mlx-community/Qwen3-4B-bf16`
 - draft: `z-lab/Qwen3-4B-DFlash-b16`
 
+There is also experimental `qwen3_5` support for `dflash` only:
+
+- `mlx-community/Qwen3.5-4B-bf16` + `z-lab/Qwen3.5-4B-DFlash`
+- `mlx-community/Qwen3.5-9B-bf16` + `z-lab/Qwen3.5-9B-DFlash`
+
 ## Local Result
 
 Representative local sweep on an Apple M2 Max (32 GB), `temperature=0`, `max_new_tokens=512`, 8 gsm8k prompts, 2 warmup prompts:
@@ -28,6 +33,23 @@ Notes:
 - Optional target quantization (`--target-quant-bits 4 --target-quant-group-size 64`) helped DTree locally, but hurt DFlash. It stays opt-in.
 
 More detail is in [OPTIMIZATION_README.md](OPTIMIZATION_README.md).
+
+## Qwen3.5 DFlash
+
+Janet prompt, `temperature=0`, `max_new_tokens=128`, 1 warmup run, Apple M2 Max:
+
+| Model | Method | Gen TPS | End-to-end TPS | Mean accept |
+|---|---|---:|---:|---:|
+| Qwen3.5-4B | Plain MLX-LM | 37.05 | 33.46 | — |
+| Qwen3.5-4B | DFlash | 47.93 | 44.93 | 5.12 |
+| Qwen3.5-9B | Plain MLX-LM | 18.97 | 17.40 | — |
+| Qwen3.5-9B | DFlash | 20.47 | 19.56 | 4.19 |
+
+Notes:
+
+- `qwen3_5` currently supports `dflash` only, not `dtree`.
+- The better default for `qwen3_5` is `--draft-attention-mask none`.
+- The 4B pair speeds up cleanly on this prompt. The 9B pair only gives a small local win and still trails the best public MLX Qwen3.5 DFlash numbers.
 
 ## Reproduce
 
@@ -106,6 +128,16 @@ Single prompt:
 ```bash
 uv run dtree-mlx --prompt "Explain quicksort" --decode-mode dflash
 uv run dtree-mlx --prompt "Explain quicksort" --decode-mode dtree --tree-budget 24
+
+uv run dtree-mlx \
+    --target-model mlx-community/Qwen3.5-4B-bf16 \
+    --draft-model z-lab/Qwen3.5-4B-DFlash \
+    --decode-mode dflash
+
+uv run dtree-mlx \
+    --target-model mlx-community/Qwen3.5-9B-bf16 \
+    --draft-model z-lab/Qwen3.5-9B-DFlash \
+    --decode-mode dflash
 ```
 
 Benchmark datasets:
@@ -143,6 +175,7 @@ uv run pytest tests/ -v
 
 - `dtree-mlx-compare` alternates DFlash/DTree order across prompts.
 - `parallel-replay` is still available, but it is not the fast Qwen3 baseline.
+- `qwen3_5` defaults to `draft_attention_mask=none`.
 - Upstream `dflash-mlx` M4 Max numbers are kept in [benchmarks/qwen3-results.md](benchmarks/qwen3-results.md) for reference only. They are not local `dtree-mlx` numbers.
 
 ## Credits

@@ -21,7 +21,9 @@ def sample_tokens(logits: mx.array, temperature: float) -> mx.array:
 
 def trim_draft_cache(cache: list[Any], num_tokens: int) -> None:
     for layer_cache in cache:
-        layer_cache.trim(num_tokens)
+        trim = getattr(layer_cache, "trim", None)
+        if trim is not None:
+            trim(num_tokens)
 
 
 def generated_token_count(output_tokens: list[int], prompt_len: int) -> int:

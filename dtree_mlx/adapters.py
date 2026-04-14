@@ -11,6 +11,7 @@ from mlx_lm import load
 from mlx_lm.models import cache as cache_lib
 from mlx_lm.models import qwen3
 
+from .model_prep import prepare_custom_model
 from .qwen3_tree import forward_transformer_block_with_position_ids
 
 
@@ -141,6 +142,168 @@ class MLXTargetAdapter:
         raise NotImplementedError(
             f"{self.family} does not implement DTree cache compaction."
         )
+
+
+class Qwen35TargetAdapter(MLXTargetAdapter):
+    family = "qwen3_5"
+
+    def resolve_target_model_path(self, path_or_repo: str) -> Path:
+        model_path = resolve_model_path(path_or_repo)
+        config = json.loads((model_path / "config.json").read_text())
+        if (
+            config.get("model_type") == "qwen3_5"
+            and config.get("model_file") != "custom_qwen35_dflash_model.py"
+        ):
+            source_id = path_or_repo if not Path(path_or_repo).exists() else str(model_path)
+            return prepare_custom_model(source_id)
+        return model_path
+
+    def build_prompt(self, tokenizer, prompt_text: str) -> mx.array:
+        messages = [{"role": "user", "content": prompt_text}]
+        try:
+            prompt = tokenizer.apply_chat_template(
+                messages,
+                tokenize=False,
+                add_generation_prompt=True,
+                enable_thinking=False,
+            )
+        except TypeError:
+            prompt = tokenizer.apply_chat_template(
+                messages,
+                tokenize=False,
+                add_generation_prompt=True,
+            )
+        tokens = tokenizer.encode(prompt, add_special_tokens=False)
+        return mx.array(tokens, dtype=mx.uint32)
+
+    def stop_token_ids(self, tokenizer) -> set[int]:
+        eos_token_ids = tokenizer.eos_token_ids
+        if isinstance(eos_token_ids, int):
+            return {eos_token_ids}
+        return set(eos_token_ids)
+
+    def embed_tokens(self, model, tokens: mx.array) -> mx.array:
+        return model.language_model.model.embed_tokens(tokens)
+
+    def lm_head_logits(self, model, hidden_states: mx.array) -> mx.array:
+        language_model = model.language_model
+        text_model = language_model.model
+        if language_model.args.tie_word_embeddings:
+            return text_model.embed_tokens.as_linear(hidden_states)
+        return language_model.lm_head(hidden_states)
+
+    def forward_with_hidden_states(
+        self,
+        model,
+        inputs: mx.array,
+        cache: list[Any],
+        layer_ids: list[int],
+        return_rollback_records: bool = False,
+    ) -> tuple[mx.array, mx.array] | tuple[mx.array, mx.array, dict[int, dict[str, mx.array]]]:
+        if not hasattr(model, "forward_dflash"):
+            raise NotImplementedError(
+                "Qwen3.5 support requires the custom MLX model wrapper."
+            )
+        return model.forward_dflash(
+            inputs=inputs,
+            cache=cache,
+            layer_ids=layer_ids,
+            return_rollback_records=return_rollback_records,
+        )
+
+    def forward_verifier_states(
+        self,
+        model,
+        inputs: mx.array,
+        cache: list[Any],
+        layer_ids: list[int],
+    ) -> tuple[mx.array, mx.array, dict[int, dict[str, mx.array]]]:
+        if hasattr(model, "language_model") and hasattr(
+            model.language_model.model,
+            "forward_dflash",
+        ):
+            return model.language_model.model.forward_dflash(
+                inputs=inputs,
+                cache=cache,
+                layer_ids=layer_ids,
+                return_rollback_records=True,
+            )
+        raise NotImplementedError(
+            "Qwen3.5 lazy-logit verification requires the custom MLX model fork."
+        )
+
+    def forward_accept_all_block(
+        self,
+        model,
+        inputs: mx.array,
+        cache: list[Any],
+        layer_ids: list[int],
+    ) -> tuple[mx.array, mx.array]:
+        if hasattr(model, "language_model") and hasattr(
+            model.language_model.model,
+            "forward_dflash",
+        ):
+            norm_hidden_states, target_hidden = model.language_model.model.forward_dflash(
+                inputs=inputs,
+                cache=cache,
+                layer_ids=layer_ids,
+                return_rollback_records=False,
+            )
+            return self.lm_head_logits(model, norm_hidden_states[:, -1:, :]), target_hidden
+        return super().forward_accept_all_block(model, inputs, cache, layer_ids)
+
+    def snapshot_linear_caches(
+        self,
+        model,
+        cache: list[Any],
+    ) -> dict[int, list[mx.array | None]]:
+        if hasattr(model, "snapshot_linear_caches"):
+            return model.snapshot_linear_caches(cache)
+        raise NotImplementedError(
+            "Qwen3.5 linear-cache snapshots require the custom MLX model wrapper."
+        )
+
+    def restore_linear_caches(
+        self,
+        model,
+        cache: list[Any],
+        snapshots: dict[int, list[mx.array | None]],
+    ) -> None:
+        if hasattr(model, "restore_linear_caches"):
+            model.restore_linear_caches(cache, snapshots)
+            return
+        raise NotImplementedError(
+            "Qwen3.5 linear-cache restore requires the custom MLX model wrapper."
+        )
+
+    def rewind_kv_caches(self, cache: list[Any], num_tokens: int) -> None:
+        for layer_cache in cache:
+            if isinstance(layer_cache, cache_lib.KVCache):
+                layer_cache.trim(num_tokens)
+
+    def rollback_linear_caches(
+        self,
+        model,
+        cache: list[Any],
+        rollback_records: dict[int, dict[str, mx.array]],
+        accepted_inputs: int,
+    ) -> None:
+        if hasattr(model, "rollback_linear_caches"):
+            model.rollback_linear_caches(cache, rollback_records, accepted_inputs)
+            return
+        raise NotImplementedError(
+            "Qwen3.5 linear-cache rollback requires the custom MLX model wrapper."
+        )
+
+    def cache_summary(self, cache: list[Any]) -> str:
+        parts: list[str] = []
+        for idx, layer_cache in enumerate(cache):
+            if isinstance(layer_cache, cache_lib.KVCache):
+                parts.append(f"{idx}:kv={layer_cache.offset}")
+            elif isinstance(layer_cache, cache_lib.ArraysCache):
+                recurrent = None if layer_cache[1] is None else tuple(layer_cache[1].shape)
+                parts.append(f"{idx}:ssm={recurrent}")
+        return " ".join(parts)
 
 
 class Qwen3TargetAdapter(MLXTargetAdapter):
@@ -358,6 +521,7 @@ class Qwen3TargetAdapter(MLXTargetAdapter):
 
 ADAPTERS: dict[str, type[MLXTargetAdapter]] = {
     "qwen3": Qwen3TargetAdapter,
+    "qwen3_5": Qwen35TargetAdapter,
 }
 
 

@@ -199,6 +199,11 @@ def main() -> None:
         draft_quant_group_size=args.draft_quant_group_size,
         seed=args.seed,
     )
+    if args.decode_mode == "dtree" and not runner.target.supports_tree_verification():
+        raise SystemExit(
+            f"DTree is not implemented for target adapter family="
+            f"{runner.target.adapter.family!r}. Use --decode-mode dflash for this target."
+        )
     log(f"[target path] {runner.target_model_path}")
     log(f"[draft path] {runner.draft_path}")
 

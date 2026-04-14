@@ -104,3 +104,30 @@ If we keep pushing on the current 4B setup, the remaining worthwhile directions 
 3. Improve the draft:
    - better draft quality
    - or a larger-block draft than the current `b16`
+
+## Qwen3.5 Notes
+
+Local Janet prompt check, `temperature=0`, `max_new_tokens=128`, 1 warmup run:
+
+| Model | Method | Gen TPS | End-to-end TPS | Mean accept |
+|---|---|---:|---:|---:|
+| Qwen3.5-4B | Plain MLX-LM | 37.05 | 33.46 | — |
+| Qwen3.5-4B | DFlash | 47.93 | 44.93 | 5.12 |
+| Qwen3.5-9B | Plain MLX-LM | 18.97 | 17.40 | — |
+| Qwen3.5-9B | DFlash | 20.47 | 19.56 | 4.19 |
+
+Reference fork checked on the same prompt:
+
+| Repo | Model | Gen TPS | End-to-end TPS | Tokens/cycle |
+|---|---|---:|---:|---:|
+| `bstnxbt/dflash-mlx` | Qwen3.5-4B | 56.58 | 41.96 | 6.10 |
+| `bstnxbt/dflash-mlx` | Qwen3.5-9B | 32.18 | 30.01 | 5.57 |
+
+Takeaways:
+
+- On our current code, `qwen3_5` does better with `draft_attention_mask=none` than `causal`.
+- A direct port of the reference draft-side cache/attention rewrite did not help here and regressed 9B, so it was removed.
+- The remaining 9B gap is probably not “just one draft kernel.” The bigger missing pieces are on the target-side hybrid attention path:
+  - recurrent rollback cache
+  - split full-attention SDPA
+  - exact small-projection handling
