@@ -34,6 +34,13 @@ Important context:
 - The old README table in this repo mixed stale measurements with an omitted DFlash verifier mode.
 - DTree is not currently "broken" on this machine. It is already roughly tied with the fast DFlash baseline.
 
+Prompt-set sweep on three gsm8k-style prompts:
+- Best tested DFlash setting in the sweep: `speculative_tokens=16`
+- Best tested fixed DTree setting in the sweep: `speculative_tokens=20`, `tree_budget=24`
+- Repeated A/B at `speculative_tokens=20`:
+  - `tree_budget=18`: `55.40 gen_tps / 52.81 e2e_tps`, accept `6.15`
+  - `tree_budget=24`: `60.11 gen_tps / 57.03 e2e_tps`, accept `6.83`
+
 ## What We Verified
 
 ### 1. The old README numbers were misleading
@@ -84,6 +91,63 @@ Result:
 Conclusion:
 - Hidden-state concatenation is not the main bottleneck at current sizes.
 
+### 6. Adaptive and hybrid tree policies were tested and did not help
+
+Tested:
+- `tree_budget_mode=adaptive`
+- `tree_budget_mode=hybrid` with two policies:
+  - linear fallback on any reduced budget
+  - linear fallback only on the strongest-confidence rounds
+
+Representative results from `scripts/profile_dtree.py`:
+- Fixed `tree_budget=24`: about `58.9 gen_tps / 55.9 e2e_tps`, accept `6.83`
+- Adaptive cap `24`: about `50.3 gen_tps / 48.1 e2e_tps`, accept `5.69`
+- Hybrid cap `24` after tightening the gate: about `51.0 gen_tps / 48.6 e2e_tps`, accept `6.19`
+
+Conclusion:
+- The confidence heuristic cut too much acceptance.
+- Routing easy rounds to linear verification does not recover enough performance.
+- Tree-routing policy is not the best next lever.
+
+### 7. Sweeping speculative horizon showed a plateau, not a hidden win
+
+From a fixed-budget sweep:
+- DFlash improved up to about `speculative_tokens=16` and then flattened.
+- DTree with `tree_budget=24` was weak at `speculative_tokens=8` and `12`, then plateaued once `speculative_tokens >= 16`.
+- Moving from `16` to `20` or `24` speculative tokens barely changed DTree throughput.
+
+Conclusion:
+- There is no large missed win from speculative horizon tuning on this prompt set.
+- The useful DTree operating region is already known: `speculative_tokens` around `16-24`, `tree_budget` around the low 20s.
+
+### 8. A simple DTree greedy verifier path did not move the needle
+
+Tested:
+- wiring `parallel-greedy-argmax` into the actual tree posterior-selection path
+
+Repeated fixed-DTree comparison at `speculative_tokens=20`, `tree_budget=24`:
+- `parallel-replay`: `60.80 gen_tps / 57.70 e2e_tps`
+- `parallel-greedy-argmax`: `60.74 gen_tps / 57.13 e2e_tps`
+
+Conclusion:
+- The tree verifier is not spending meaningful time in the final posterior token selection step.
+- The expensive part is earlier in the exact tree forward / hidden-state verification work.
+
+### 9. A shallower, breadth-biased tree score looked worse
+
+Ad hoc experiment:
+- monkeypatched the tree builder to score candidates as `path_log_prob - depth_penalty * depth`
+- tested small positive penalties on the current best fixed setting
+
+Observed trend before the run was stopped by Metal OOM from repeated model reloads:
+- baseline penalty `0.00`: about `62.4 gen_tps / 59.2 e2e_tps`, accept `6.83`
+- penalty `0.15`: about `60.1 gen_tps / 57.1 e2e_tps`, accept `6.63`
+- penalty `0.30`: about `56.4 gen_tps / 53.7 e2e_tps`, accept `6.58`
+
+Conclusion:
+- simple depth penalization reduces acceptance and throughput on this prompt set
+- the current best-first path score is not obviously leaving an easy win on the table
+
 ## Core Performance Problem
 
 DTree currently verifies a larger batch than DFlash, but does not gain enough extra acceptance to dominate.
@@ -101,42 +165,7 @@ So the real problem is:
 
 ## Priority Optimization Ideas
 
-## A. Adaptive Tree Budget
-
-Best near-term idea.
-
-Instead of always verifying `1 + tree_budget` nodes:
-- use a smaller tree on easy/high-confidence rounds
-- use a larger tree only on uncertain rounds
-
-Why it matters:
-- many rounds likely do not need 25 verified nodes
-- this directly attacks wasted verifier work
-
-Possible implementation:
-- add `--tree-budget-mode adaptive`
-- use draft top-k margin / entropy / cumulative mass to choose budget per round
-- log the realized average budget
-
-Success condition:
-- same or better acceptance with lower average verified nodes
-
-## B. Confidence-Gated Hybrid DFlash/DTree
-
-Use DFlash behavior on easy rounds and DTree only when the draft looks uncertain.
-
-Why it matters:
-- DFlash's fast verifier path is already strong on Qwen3
-- DTree should only pay its extra cost when tree branching is likely to help
-
-Possible implementation:
-- add a policy that starts from the draft logits
-- choose linear verify when top-1 is decisive
-- choose tree verify when the top tokens are close
-
-This is likely more useful than always running tree verification.
-
-## C. Better Tree Construction Policy
+## A. Better Tree Construction Policy
 
 Current tree construction is best-first over draft log-probability.
 
@@ -150,22 +179,19 @@ Ideas:
 Goal:
 - more acceptance from the same `tree_budget`
 
-## D. Faster DTree Verifier Output Path
-
-DFlash benefits a lot from `parallel-greedy-argmax` on Qwen3 at `temperature=0`.
-DTree still computes full LM-head logits and then argmaxes them.
+## B. Real Fused LM-Head / Top-1 Path
 
 Possible work:
-- add a DTree greedy verifier path for `temperature=0`
 - expose a real fused `lm_head_argmax()` path in the Qwen3 adapter instead of full logits followed by `mx.argmax`
+- verify whether MLX can avoid materializing the full vocab projection for top-1 selection
 
 Expected payoff:
-- potentially meaningful, because verifier time dominates
+- potentially meaningful, because verifier time dominates and the simple tree-side argmax rewrite was neutral
 
 Risk:
-- only helps if the LM-head materialization is a real share of verifier cost
+- only helps if the LM-head / output projection is a real share of verifier cost
 
-## E. Larger-Granularity MLX Compilation / Fusion
+## C. Larger-Granularity MLX Compilation / Fusion
 
 Current tree code uses compiled per-layer tree blocks.
 
@@ -179,7 +205,7 @@ Potential targets:
 
 This is more invasive, but may pay off if MLX scheduling overhead is still significant.
 
-## F. DTree Lazy-Logit / Early-Exit Verification
+## D. DTree Lazy-Logit / Early-Exit Verification
 
 DFlash already has alternate verifier strategies such as lazy logits and greedy argmax.
 
@@ -191,7 +217,7 @@ Potential idea:
 
 This is harder than the DFlash case because tree acceptance depends on multiple node outputs, but it is still one of the few directions that directly attacks the dominant cost center.
 
-## G. Improve the Draft / Acceptance Rate
+## E. Improve the Draft / Acceptance Rate
 
 If DTree cannot get much more than `6.5` accepted tokens on average from `25` verified nodes, runtime optimization alone will not transform the result.
 
@@ -202,6 +228,15 @@ Possible directions:
 - train or fine-tune a tree-aware draft objective
 
 This is higher effort, but may be the only way to move the acceptance economics materially.
+
+## F. Adaptive / Hybrid Policies Revisited Later
+
+These were tested once and lost clearly, but they may be worth revisiting only if:
+- the tree construction policy changes
+- the confidence signal gets much better
+- or a cheaper linear verifier path becomes available
+
+For now they should not be the main focus.
 
 ## Secondary Ideas
 
@@ -238,11 +273,11 @@ This repo already had one README-number mismatch caused by hidden benchmark assu
 
 ## Suggested Next Work Order
 
-1. Implement adaptive tree budget.
-2. Add a hybrid DFlash/DTree policy based on draft confidence.
-3. Add a DTree greedy verifier path for `temperature=0`.
-4. Build a small sweep tool to compare fixed vs adaptive budgets on a prompt set.
-5. Only after that, revisit lower-level MLX fusion work.
+1. Improve tree construction so the same verified-node budget buys more acceptance.
+2. Investigate a real fused MLX top-1 / LM-head path for Qwen3.
+3. Explore larger-granularity compilation or fusion of the verifier path.
+4. Consider tree-aware lazy-logit / early-exit verification ideas.
+5. Revisit adaptive or hybrid routing only after one of the above changes lands.
 
 ## Things That Are Probably Not Worth Prioritizing
 
