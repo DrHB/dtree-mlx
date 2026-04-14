@@ -30,6 +30,13 @@ print(f"\nDFLASH baseline: gen_tps={sum(dflash_gen)/len(dflash_gen):.2f} e2e_tps
 # DTree sweep
 print(f"{'budget':>7} {'gen_tps':>8} {'e2e_tps':>8} {'accept':>7} {'draft':>7} {'build':>7} {'cmpl':>7} {'verify':>7} {'book':>7} {'unatr':>7}")
 for b in BUDGETS:
+    gen.generate(
+        PROMPTS[0],
+        max_new_tokens=64,
+        decode_mode="dtree",
+        speculative_tokens=SPECULATIVE,
+        tree_budget=b,
+    )
     totals = {k: 0.0 for k in ["draft_time_s","tree_build_time_s","tree_compile_time_s","verify_time_s","bookkeeping_time_s","unattributed_decode_time_s"]}
     steps = 0
     e2e = []
