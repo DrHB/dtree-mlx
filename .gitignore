@@ -1,0 +1,12 @@
+__pycache__/
+.DS_Store
+cache/
+*.egg-info/
+.venv*/
+.hf_modules/
+*.pyc
+dist/
+build/
+marketing/
+benchmarks/metrics_history.csv
+.pytest_cache/

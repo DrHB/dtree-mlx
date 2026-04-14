@@ -1,0 +1,55 @@
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "dtree-mlx"
+version = "0.1.0"
+description = "Head-to-head DFlash vs DTree speculative decoding on Apple Silicon (MLX, Qwen3)"
+readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [
+    { name = "DrHB" },
+]
+keywords = [
+    "apple-silicon",
+    "dflash",
+    "dtree",
+    "tree-speculative-decoding",
+    "mlx",
+    "speculative-decoding",
+]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3 :: Only",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
+requires-python = ">=3.10"
+dependencies = [
+    "mlx",
+    "mlx-lm",
+    "huggingface-hub",
+    "datasets",
+    "numpy",
+]
+
+[project.urls]
+Homepage = "https://github.com/DrHB/dtree-mlx"
+Repository = "https://github.com/DrHB/dtree-mlx"
+Issues = "https://github.com/DrHB/dtree-mlx/issues"
+
+[project.scripts]
+dtree-mlx = "dtree_mlx.cli:main"
+dtree-mlx-bench = "dtree_mlx.benchmark_cli:main"
+dtree-mlx-compare = "dtree_mlx.compare_cli:main"
+
+[tool.setuptools.packages.find]
+include = ["dtree_mlx*"]
+
+[project.optional-dependencies]
+charts = [
+    "matplotlib",
+]
