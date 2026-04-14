@@ -32,13 +32,49 @@ DTREE_TREE_BUILD_STAGE_ORDER = (
     "tree_build_heap_time_s",
     "tree_build_visibility_time_s",
 )
+DTREE_VERIFY_DETAIL_STAGE_ORDER = (
+    "verify_tree_forward_time_s",
+    "verify_tree_logits_time_s",
+    "verify_tree_sample_time_s",
+)
+DTREE_BOOKKEEPING_DETAIL_STAGE_ORDER = (
+    "bookkeeping_follow_tree_time_s",
+    "bookkeeping_cache_compact_time_s",
+    "bookkeeping_hidden_select_time_s",
+    "bookkeeping_output_commit_time_s",
+)
 
 
 def empty_dtree_profile() -> dict[str, float]:
     return {
         **{name: 0.0 for name in DTREE_STAGE_ORDER},
         **{name: 0.0 for name in DTREE_TREE_BUILD_STAGE_ORDER},
+        **{name: 0.0 for name in DTREE_VERIFY_DETAIL_STAGE_ORDER},
+        **{name: 0.0 for name in DTREE_BOOKKEEPING_DETAIL_STAGE_ORDER},
     }
+
+
+def cache_compaction_eval_tensors(
+    cache: list[Any],
+    past_length: int,
+    keep_count: int,
+) -> list[mx.array]:
+    if keep_count <= 0:
+        return []
+
+    tensors: list[mx.array] = []
+    for layer_cache in cache:
+        keys = getattr(layer_cache, "keys", None)
+        values = getattr(layer_cache, "values", None)
+        offset = getattr(layer_cache, "offset", None)
+        if keys is None or values is None or offset is None:
+            continue
+        end = min(past_length + keep_count, int(offset))
+        if end <= past_length:
+            continue
+        tensors.append(keys[..., past_length:end, :])
+        tensors.append(values[..., past_length:end, :])
+    return tensors
 
 
 def build_dtree_tree(
@@ -271,33 +307,95 @@ def dtree_generate(
         add_profile_elapsed(profile_times, "tree_compile_time_s", tree_compile_start)
 
         verify_start = profile_start(profile_times)
-        norm_hidden_states, verifier_hidden = target.forward_tree_with_hidden_states(
-            verify_input_ids,
-            target_cache,
-            layer_ids,
-            position_ids=verify_position_ids,
-            attention_mask=attention_mask,
-        )
-        posterior = sample_tokens(target.lm_head_logits(norm_hidden_states), temperature)
-        mx.eval(posterior, verifier_hidden)
+        if profile_times is not None:
+            verify_forward_start = profile_start(profile_times)
+            norm_hidden_states, verifier_hidden = target.forward_tree_with_hidden_states(
+                verify_input_ids,
+                target_cache,
+                layer_ids,
+                position_ids=verify_position_ids,
+                attention_mask=attention_mask,
+            )
+            mx.eval(norm_hidden_states, verifier_hidden)
+            add_profile_elapsed(
+                profile_times,
+                "verify_tree_forward_time_s",
+                verify_forward_start,
+            )
+
+            verify_logits_start = profile_start(profile_times)
+            verifier_logits = target.lm_head_logits(norm_hidden_states)
+            mx.eval(verifier_logits)
+            add_profile_elapsed(
+                profile_times,
+                "verify_tree_logits_time_s",
+                verify_logits_start,
+            )
+
+            verify_sample_start = profile_start(profile_times)
+            posterior = sample_tokens(verifier_logits, temperature)
+            mx.eval(posterior)
+            add_profile_elapsed(
+                profile_times,
+                "verify_tree_sample_time_s",
+                verify_sample_start,
+            )
+        else:
+            norm_hidden_states, verifier_hidden = target.forward_tree_with_hidden_states(
+                verify_input_ids,
+                target_cache,
+                layer_ids,
+                position_ids=verify_position_ids,
+                attention_mask=attention_mask,
+            )
+            posterior = sample_tokens(target.lm_head_logits(norm_hidden_states), temperature)
+            mx.eval(posterior, verifier_hidden)
         add_profile_elapsed(profile_times, "verify_time_s", verify_start)
 
         bookkeeping_start = profile_start(profile_times)
+        follow_tree_start = profile_start(profile_times)
         posterior_tokens = posterior[0].tolist()
         accepted_indices, posterior_token = follow_verified_tree(child_maps, posterior_tokens)
         accepted_inputs = len(accepted_indices)
         accepted_token_ids = [tree_tokens[index] for index in accepted_indices]
+        add_profile_elapsed(
+            profile_times,
+            "bookkeeping_follow_tree_time_s",
+            follow_tree_start,
+        )
 
+        compact_start = profile_start(profile_times)
         target.compact_kv_caches(
             target_cache,
             past_length=start,
             keep_current_indices=accepted_indices,
         )
+        if profile_times is not None:
+            compact_tensors = cache_compaction_eval_tensors(
+                target_cache,
+                past_length=start,
+                keep_count=accepted_inputs,
+            )
+            if compact_tensors:
+                mx.eval(*compact_tensors)
+        add_profile_elapsed(
+            profile_times,
+            "bookkeeping_cache_compact_time_s",
+            compact_start,
+        )
+
+        hidden_select_start = profile_start(profile_times)
         accepted_index_array = mx.array(accepted_indices, dtype=mx.uint32)
         target_hidden = mx.take(verifier_hidden, accepted_index_array, axis=1)
         if profile_times is not None:
             mx.eval(target_hidden)
+        add_profile_elapsed(
+            profile_times,
+            "bookkeeping_hidden_select_time_s",
+            hidden_select_start,
+        )
 
+        output_commit_start = profile_start(profile_times)
         output_tokens = output_tokens[:start]
         output_tokens.extend(accepted_token_ids)
         output_tokens.append(posterior_token)
@@ -305,6 +403,11 @@ def dtree_generate(
 
         acceptance_lengths.append(accepted_inputs)
         verified_tree_nodes.append(len(tree_tokens))
+        add_profile_elapsed(
+            profile_times,
+            "bookkeeping_output_commit_time_s",
+            output_commit_start,
+        )
         add_profile_elapsed(profile_times, "bookkeeping_time_s", bookkeeping_start)
 
         stop_idx = stop_position(output_tokens, prompt_len, stop_token_ids)
@@ -341,7 +444,7 @@ def dtree_generate(
         "tree_budget": effective_tree_budget,
     }
     if profile_times is not None:
-        profiled_time = sum(profile_times.values())
+        profiled_time = sum(profile_times[name] for name in DTREE_STAGE_ORDER)
         metrics["profile"] = {
             **profile_times,
             "unattributed_decode_time_s": decode_time - profiled_time,

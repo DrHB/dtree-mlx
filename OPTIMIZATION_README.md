@@ -36,8 +36,9 @@ Important context:
 
 Prompt-set sweep on three gsm8k-style prompts:
 - Best tested DFlash setting in the sweep: `speculative_tokens=16`
-- Best tested fixed DTree setting in the sweep: `speculative_tokens=20`, `tree_budget=24`
-- Repeated A/B at `speculative_tokens=20`:
+- Important correction: the current `z-lab/Qwen3-4B-DFlash-b16` draft has `block_size=16`, and both DFlash and DTree clamp `speculative_tokens` to `draft.block_size`, so any earlier sweep entry above `16` was effectively still running `16`.
+- Best tested fixed DTree setting in the sweep was therefore effectively `speculative_tokens=16`, `tree_budget=24`
+- Repeated A/B at requested `speculative_tokens=20`:
   - `tree_budget=18`: `55.40 gen_tps / 52.81 e2e_tps`, accept `6.15`
   - `tree_budget=24`: `60.11 gen_tps / 57.03 e2e_tps`, accept `6.83`
 
@@ -109,23 +110,23 @@ Conclusion:
 - Routing easy rounds to linear verification does not recover enough performance.
 - Tree-routing policy is not the best next lever.
 
-### 7. Sweeping speculative horizon showed a plateau, not a hidden win
+### 7. Sweeping speculative horizon surfaced a block-size cap
 
 From a fixed-budget sweep:
 - DFlash improved up to about `speculative_tokens=16` and then flattened.
-- DTree with `tree_budget=24` was weak at `speculative_tokens=8` and `12`, then plateaued once `speculative_tokens >= 16`.
-- Moving from `16` to `20` or `24` speculative tokens barely changed DTree throughput.
+- DTree with `tree_budget=24` was weak at `speculative_tokens=8` and `12`, then appeared to plateau once `speculative_tokens >= 16`.
+- That apparent plateau was explained by the draft cap: `speculative_tokens > 16` was being clamped to `16`.
 
 Conclusion:
-- There is no large missed win from speculative horizon tuning on this prompt set.
-- The useful DTree operating region is already known: `speculative_tokens` around `16-24`, `tree_budget` around the low 20s.
+- There is no larger-horizon win available with the current `b16` draft.
+- Any real horizon gain now requires a different draft checkpoint with `block_size > 16`.
 
 ### 8. A simple DTree greedy verifier path did not move the needle
 
 Tested:
 - wiring `parallel-greedy-argmax` into the actual tree posterior-selection path
 
-Repeated fixed-DTree comparison at `speculative_tokens=20`, `tree_budget=24`:
+Repeated fixed-DTree comparison at requested `speculative_tokens=20`, `tree_budget=24`:
 - `parallel-replay`: `60.80 gen_tps / 57.70 e2e_tps`
 - `parallel-greedy-argmax`: `60.74 gen_tps / 57.13 e2e_tps`
 
@@ -147,6 +148,50 @@ Observed trend before the run was stopped by Metal OOM from repeated model reloa
 Conclusion:
 - simple depth penalization reduces acceptance and throughput on this prompt set
 - the current best-first path score is not obviously leaving an easy win on the table
+
+### 10. Target quantization is mode-dependent, not a free win
+
+Local code now supports optional target quantization via:
+- `--target-quant-bits`
+- `--target-quant-group-size`
+
+Matched 8-prompt gsm8k sweep on this M2 Max with `verify_mode=parallel-greedy-argmax`:
+- bf16 target:
+  - DFlash: `51.87 gen_tps / 50.31 e2e_tps`, accept `5.71`
+  - DTree: `56.68 gen_tps / 54.83 e2e_tps`, accept `7.17`
+- `4-bit`, `group_size=64` target:
+  - DFlash: `48.96 gen_tps / 47.36 e2e_tps`, accept `5.56`
+  - DTree: `58.43 gen_tps / 56.09 e2e_tps`, accept `6.88`
+
+Short 3-prompt group-size spot check:
+- bf16 target:
+  - DFlash: `52.69 e2e_tps`
+  - DTree: `54.46 e2e_tps`
+- `4-bit`, `group_size=32`:
+  - DFlash: `46.43 e2e_tps`
+  - DTree: `56.15 e2e_tps`
+- `4-bit`, `group_size=64`:
+  - DFlash: `46.18 e2e_tps`
+  - DTree: `58.64 e2e_tps`
+- `4-bit`, `group_size=128`:
+  - DFlash: `48.05 e2e_tps`
+  - DTree: `54.38 e2e_tps`
+
+Small downstream gsm8k sanity slice (`N=12`, `max_new_tokens=512`):
+- bf16 target:
+  - plain: `9/12`
+  - DFlash: `10/12`
+  - DTree: `11/12`
+- `4-bit`, `group_size=64` target:
+  - plain: `11/12`
+  - DFlash: `12/12`
+  - DTree: `11/12`
+
+Conclusion:
+- `4-bit`, `group_size=64` is the first runtime change that consistently helped DTree on local sweeps.
+- The same setting hurt DFlash throughput on the same prompts.
+- The small gsm8k slice did not show a correctness collapse, but it is far too small to treat as definitive.
+- This should remain an opt-in DTree-focused flag, not a new default.
 
 ## Core Performance Problem
 

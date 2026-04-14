@@ -56,6 +56,8 @@ def parse_args() -> argparse.Namespace:
         help="Verifier strategy to use for the DFlash baseline.",
     )
     parser.add_argument("--verify-chunk-size", type=int, default=4)
+    parser.add_argument("--target-quant-bits", type=int, default=None)
+    parser.add_argument("--target-quant-group-size", type=int, default=64)
     parser.add_argument("--draft-quant-bits", type=int, default=None)
     parser.add_argument("--draft-quant-group-size", type=int, default=64)
     parser.add_argument(
@@ -115,6 +117,8 @@ def main() -> None:
         target_model=args.target_model,
         draft_model=args.draft_model,
         draft_attention_mask=args.draft_attention_mask,
+        target_quant_bits=args.target_quant_bits,
+        target_quant_group_size=args.target_quant_group_size,
         draft_quant_bits=args.draft_quant_bits,
         draft_quant_group_size=args.draft_quant_group_size,
         seed=args.seed,

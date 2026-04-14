@@ -21,7 +21,7 @@ Single-prompt head-to-head on Apple M2 Max (32 GB), Qwen3-4B-bf16 target + z-lab
 
 Both spec-decode methods comfortably beat vanilla. On this prompt, DTree still accepts ~10% more tokens per step than DFlash (6.53 vs 5.90), and with the current Qwen3 verifier paths both methods land at roughly the same throughput on this M2 Max. The important caveat is that the DFlash baseline is sensitive to verifier mode: exact `parallel-greedy-argmax` is much faster than exact `parallel-replay` on Qwen3 at `temperature=0`. The remaining optimization target for DTree is still verifier cost: tree verification dominates DTree decode time, especially once `tree_budget` grows past 24.
 
-Short local tuning note: on a small 3-prompt gsm8k-style sweep on this M2 Max, the best fixed DTree setting we found was `--speculative-tokens 20 --tree-budget 24`. Adaptive/hybrid routing experiments did not help. Details: [`OPTIMIZATION_README.md`](OPTIMIZATION_README.md).
+Short local tuning note: the current Qwen3-4B draft is `b16`, so runtime clamps `--speculative-tokens` above `16`. On local gsm8k-style sweeps on this M2 Max, the best fixed DTree setting we found was effectively `--speculative-tokens 16 --tree-budget 24`. Adaptive/hybrid routing experiments did not help. Experimental target quantization is now exposed behind `--target-quant-bits`: `4-bit` with `group_size=64` helped DTree on our local sweeps, but it hurt DFlash and should stay opt-in for now. Details: [`OPTIMIZATION_README.md`](OPTIMIZATION_README.md).
 
 Reproduce:
 

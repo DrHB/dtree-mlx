@@ -113,6 +113,8 @@ def parse_args() -> argparse.Namespace:
         ),
     )
     parser.add_argument("--verify-chunk-size", type=int, default=4)
+    parser.add_argument("--target-quant-bits", type=int, default=None)
+    parser.add_argument("--target-quant-group-size", type=int, default=64)
     parser.add_argument("--draft-quant-bits", type=int, default=None)
     parser.add_argument("--draft-quant-group-size", type=int, default=64)
     parser.add_argument(
@@ -191,6 +193,8 @@ def main() -> None:
         target_model=args.target_model,
         draft_model=args.draft_model,
         draft_attention_mask=args.draft_attention_mask,
+        target_quant_bits=args.target_quant_bits,
+        target_quant_group_size=args.target_quant_group_size,
         draft_quant_bits=args.draft_quant_bits,
         draft_quant_group_size=args.draft_quant_group_size,
         seed=args.seed,
@@ -268,6 +272,12 @@ def main() -> None:
     log(f"Draft model:              {runner.draft_path}")
     log(f"Draft attention mask:     {runner.draft_attention_mask}")
     log(f"Decode mode:              {metrics.get('decode_mode', args.decode_mode)}")
+    if runner.target_quantization is not None:
+        log(
+            "Target quantization:      "
+            f"{runner.target_quantization.get('bits')}bit "
+            f"g{runner.target_quantization.get('group_size')}"
+        )
     if runner.draft_quantization is not None:
         log(
             "Draft quantization:       "
@@ -304,6 +314,10 @@ def main() -> None:
             "target_model": args.target_model,
             "resolved_target_model": str(runner.target_model_path),
             "target_adapter_family": runner.target.adapter.family,
+            "target_quant_bits": args.target_quant_bits,
+            "target_quant_group_size": (
+                args.target_quant_group_size if args.target_quant_bits is not None else ""
+            ),
             "draft_model": args.draft_model,
             "resolved_draft_path": str(runner.draft_path),
             "draft_quant_bits": args.draft_quant_bits,
@@ -333,6 +347,7 @@ def main() -> None:
         "target_model": args.target_model,
         "resolved_target_model": str(runner.target_model_path),
         "target_adapter_family": runner.target.adapter.family,
+        "target_quantization": runner.target_quantization or {},
         "draft_model": args.draft_model,
         "resolved_draft_path": str(runner.draft_path),
         "draft_attention_mask": runner.draft_attention_mask,

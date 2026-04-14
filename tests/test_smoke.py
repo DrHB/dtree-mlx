@@ -64,3 +64,41 @@ def test_cli_decode_mode_defaults_to_dflash():
         assert args.decode_mode == "dflash"
     finally:
         sys.argv = saved_argv
+
+
+def test_cli_parses_target_quantization_flags():
+    from dtree_mlx import cli
+
+    saved_argv = sys.argv
+    try:
+        sys.argv = [
+            cli.__name__,
+            "--target-quant-bits",
+            "4",
+            "--target-quant-group-size",
+            "64",
+        ]
+        args = cli.parse_args()
+        assert args.target_quant_bits == 4
+        assert args.target_quant_group_size == 64
+    finally:
+        sys.argv = saved_argv
+
+
+def test_compare_cli_parses_target_quantization_flags():
+    from dtree_mlx import compare_cli
+
+    saved_argv = sys.argv
+    try:
+        sys.argv = [
+            compare_cli.__name__,
+            "--target-quant-bits",
+            "4",
+            "--target-quant-group-size",
+            "64",
+        ]
+        args = compare_cli.parse_args()
+        assert args.target_quant_bits == 4
+        assert args.target_quant_group_size == 64
+    finally:
+        sys.argv = saved_argv

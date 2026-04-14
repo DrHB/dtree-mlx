@@ -43,12 +43,17 @@ def main():
     ap.add_argument("--max-new-tokens", type=int, default=512)
     ap.add_argument("--speculative-tokens", type=int, default=16)
     ap.add_argument("--tree-budget", type=int, default=24)
+    ap.add_argument("--target-quant-bits", type=int, default=None)
+    ap.add_argument("--target-quant-group-size", type=int, default=64)
     args = ap.parse_args()
 
     ds = load_dataset("openai/gsm8k", "main", split="test")
     rows = ds.select(range(args.num_prompts))
 
-    runner = DFlashGenerator()
+    runner = DFlashGenerator(
+        target_quant_bits=args.target_quant_bits,
+        target_quant_group_size=args.target_quant_group_size,
+    )
     tokenizer = runner.target.tokenizer
     model = runner.target.model
 
@@ -101,7 +106,8 @@ def main():
     n = len(rows)
     print("=" * 70)
     print(f"N = {n}   max_new_tokens={args.max_new_tokens}  "
-          f"speculative={args.speculative_tokens}  tree_budget={args.tree_budget}")
+          f"speculative={args.speculative_tokens}  tree_budget={args.tree_budget}  "
+          f"target_quant_bits={args.target_quant_bits}")
     print(f"plain  accuracy: {plain_correct}/{n} = {plain_correct/n:.1%}")
     print(f"dflash accuracy: {dflash_correct}/{n} = {dflash_correct/n:.1%}")
     print(f"dtree  accuracy: {dtree_correct}/{n} = {dtree_correct/n:.1%}")

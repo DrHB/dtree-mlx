@@ -6,6 +6,7 @@ from typing import Any
 
 import mlx.core as mx
 from mlx_lm.generate import wired_limit
+from mlx_lm.utils import quantize_model
 
 from .adapters import LoadedTargetModel, load_target_model
 from .draft import DFlashDraftModel, load_draft_model, maybe_quantize_draft_model
@@ -31,6 +32,8 @@ class DFlashGenerator:
         target_model: str = DEFAULT_TARGET_MODEL,
         draft_model: str = DEFAULT_DRAFT_MODEL,
         draft_attention_mask: str = "auto",
+        target_quant_bits: int | None = None,
+        target_quant_group_size: int = 64,
         draft_quant_bits: int | None = None,
         draft_quant_group_size: int = 64,
         seed: int = 0,
@@ -39,6 +42,16 @@ class DFlashGenerator:
         self.requested_target_model = target_model
         self.requested_draft_model = draft_model
         self.target: LoadedTargetModel = load_target_model(target_model)
+        self.target_quantization: dict[str, Any] | None = None
+        if target_quant_bits is not None:
+            _, quantized_config = quantize_model(
+                model=self.target.model,
+                config={},
+                group_size=target_quant_group_size,
+                bits=target_quant_bits,
+            )
+            mx.eval(self.target.model.parameters())
+            self.target_quantization = quantized_config.get("quantization")
         self.draft: DFlashDraftModel
         self.draft, self.draft_path = load_draft_model(draft_model)
 
