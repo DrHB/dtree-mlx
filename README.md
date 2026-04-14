@@ -15,11 +15,11 @@ Single-prompt head-to-head on Apple M2 Max (32 GB), Qwen3-4B-bf16 target + z-lab
 
 | Method | Gen TPS | End-to-end TPS | Mean accept length | vs Vanilla |
 |---|---:|---:|---:|---:|
-| Vanilla (MLX-LM)   | 37.10 | 29.01 | — | 1.00× |
-| DFlash             | 60.32 | 56.15 | 5.90 | **1.63×** |
-| DTree              | 55.29 | 53.35 | 6.53 | 1.49× |
+| Vanilla (MLX-LM)   | 39.83 | 32.93 | — | 1.00× |
+| DFlash             | 61.76 | 55.52 | 5.90 | **1.55×** |
+| DTree              | 58.67 | 56.50 | 6.53 | 1.47× |
 
-Both spec-decode methods comfortably beat vanilla. DTree accepts ~10% more tokens per step than DFlash (6.53 vs 5.90) but currently pays that back in per-step tree-verify overhead, so it trails DFlash by ~9% on this workload. Closing that gap — faster tree-masked attention on MLX — is the next optimization target.
+Both spec-decode methods comfortably beat vanilla. On this prompt, DTree still accepts ~10% more tokens per step than DFlash (6.53 vs 5.90). DFlash keeps a small edge in raw generation TPS, but after the verifier-path optimizations DTree is now slightly ahead end-to-end on this workload (56.50 vs 55.52 TPS). The remaining optimization target is still verifier cost: tree verification dominates DTree decode time, especially once `tree_budget` grows past 24.
 
 Reproduce:
 
