@@ -112,6 +112,12 @@ def test_qwen35_adapter_is_registered():
     assert adapter_for_model_type("qwen3_5") is not None
 
 
+def test_qwen35_adapter_reports_tree_support():
+    from dtree_mlx.adapters import Qwen35TargetAdapter
+
+    assert Qwen35TargetAdapter().supports_tree_verification() is True
+
+
 def test_generator_auto_mask_uses_target_family(monkeypatch):
     from dtree_mlx import api
 

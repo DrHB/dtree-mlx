@@ -135,3 +135,22 @@ Takeaways:
   - our repo, `draft.cache_mode=context-only`: `19.24` gen TPS, `4.79` e2e TPS, `4.40` mean accept
   - `bstnxbt/dflash-mlx`: `17.46` gen TPS, `4.84` e2e TPS, `3.76` tokens/cycle
 - So the imported hybrid-target path helps more on long prefixes than on the short Janet prompt.
+
+Experimental DTree status:
+
+- The repo now has a correctness-first `qwen3_5` DTree path that keeps the real caches untouched during tree verify and commits only the accepted path.
+- On a short greedy Qwen3.5-4B check (`24` generated tokens), DTree matched DFlash token-for-token.
+
+Short Janet checks with `temperature=0` and `--speculative-tokens 8 --tree-budget 8`:
+
+| Model | Method | Gen TPS | End-to-end TPS | Mean accept |
+|---|---|---:|---:|---:|
+| Qwen3.5-4B | DFlash | 24.64 | 21.54 | 2.75 |
+| Qwen3.5-4B | DTree | 13.38 | 12.85 | 3.78 |
+| Qwen3.5-9B (`max_new_tokens=16`) | DFlash | 18.22 | 6.15 | 4.20 |
+| Qwen3.5-9B (`max_new_tokens=16`) | DTree | 7.29 | 6.82 | 3.20 |
+
+Conclusion:
+
+- `qwen3_5` DTree is functional and exact on the short 4B check.
+- It is not optimized yet, especially on 4B.

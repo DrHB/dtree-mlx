@@ -282,7 +282,7 @@ def dtree_generate(
         (
             node_token_ids,
             node_depths,
-            _parents,
+            parents,
             child_maps,
             visibility,
             tree_build_subtimes,
@@ -313,6 +313,7 @@ def dtree_generate(
                 verify_input_ids,
                 target_cache,
                 layer_ids,
+                parents=parents,
                 position_ids=verify_position_ids,
                 attention_mask=attention_mask,
             )
@@ -345,6 +346,7 @@ def dtree_generate(
                 verify_input_ids,
                 target_cache,
                 layer_ids,
+                parents=parents,
                 position_ids=verify_position_ids,
                 attention_mask=attention_mask,
             )

@@ -12,6 +12,7 @@ from mlx_lm.models import cache as cache_lib
 from mlx_lm.models import qwen3
 
 from .model_prep import prepare_custom_model
+from .qwen35_tree import commit_qwen35_tree_path, forward_qwen35_tree_with_hidden_states
 from .qwen35_target import make_target_cache as make_qwen35_target_cache
 from .qwen3_tree import forward_transformer_block_with_position_ids
 
@@ -101,6 +102,7 @@ class MLXTargetAdapter:
         inputs: mx.array,
         cache: list[Any],
         layer_ids: list[int],
+        parents: list[int],
         position_ids: mx.array,
         attention_mask: mx.array,
     ) -> tuple[mx.array, mx.array]:
@@ -152,6 +154,9 @@ class MLXTargetAdapter:
 
 class Qwen35TargetAdapter(MLXTargetAdapter):
     family = "qwen3_5"
+
+    def __init__(self) -> None:
+        self._pending_tree_state = None
 
     def resolve_target_model_path(self, path_or_repo: str) -> Path:
         model_path = resolve_model_path(path_or_repo)
@@ -326,6 +331,48 @@ class Qwen35TargetAdapter(MLXTargetAdapter):
                 parts.append(f"{idx}:ssm={recurrent}")
         return " ".join(parts)
 
+    def supports_tree_verification(self) -> bool:
+        return True
+
+    def forward_tree_with_hidden_states(
+        self,
+        model,
+        inputs: mx.array,
+        cache: list[Any],
+        layer_ids: list[int],
+        parents: list[int],
+        position_ids: mx.array,
+        attention_mask: mx.array,
+    ) -> tuple[mx.array, mx.array]:
+        del attention_mask
+        norm_hidden_states, target_hidden, pending = forward_qwen35_tree_with_hidden_states(
+            model,
+            inputs,
+            cache,
+            layer_ids,
+            parents,
+            position_ids,
+        )
+        self._pending_tree_state = pending
+        return norm_hidden_states, target_hidden
+
+    def compact_kv_caches(
+        self,
+        model,
+        cache: list[Any],
+        past_length: int,
+        keep_current_indices: list[int],
+    ) -> None:
+        del model, past_length
+        if self._pending_tree_state is None:
+            raise RuntimeError("Qwen3.5 tree compaction requires pending tree state.")
+        commit_qwen35_tree_path(
+            cache,
+            self._pending_tree_state,
+            keep_current_indices,
+        )
+        self._pending_tree_state = None
+
 
 class Qwen3TargetAdapter(MLXTargetAdapter):
     family = "qwen3"
@@ -450,9 +497,11 @@ class Qwen3TargetAdapter(MLXTargetAdapter):
         inputs: mx.array,
         cache: list[Any],
         layer_ids: list[int],
+        parents: list[int],
         position_ids: mx.array,
         attention_mask: mx.array,
     ) -> tuple[mx.array, mx.array]:
+        del parents
         text_model = model.model
         hidden_states = text_model.embed_tokens(inputs)
 
@@ -636,6 +685,7 @@ class LoadedTargetModel:
         inputs: mx.array,
         cache: list[Any],
         layer_ids: list[int],
+        parents: list[int],
         position_ids: mx.array,
         attention_mask: mx.array,
     ) -> tuple[mx.array, mx.array]:
@@ -644,6 +694,7 @@ class LoadedTargetModel:
             inputs,
             cache,
             layer_ids,
+            parents,
             position_ids,
             attention_mask,
         )

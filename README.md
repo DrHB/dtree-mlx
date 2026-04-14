@@ -10,7 +10,7 @@ Today the repo is focused on one pair:
 - target: `mlx-community/Qwen3-4B-bf16`
 - draft: `z-lab/Qwen3-4B-DFlash-b16`
 
-There is also experimental `qwen3_5` support for `dflash` only:
+There is also experimental `qwen3_5` support:
 
 - `mlx-community/Qwen3.5-4B-bf16` + `z-lab/Qwen3.5-4B-DFlash`
 - `mlx-community/Qwen3.5-9B-bf16` + `z-lab/Qwen3.5-9B-DFlash`
@@ -34,7 +34,7 @@ Notes:
 
 More detail is in [OPTIMIZATION_README.md](OPTIMIZATION_README.md).
 
-## Qwen3.5 DFlash
+## Qwen3.5
 
 Janet prompt, `temperature=0`, `max_new_tokens=128`, 1 warmup run, Apple M2 Max:
 
@@ -47,11 +47,12 @@ Janet prompt, `temperature=0`, `max_new_tokens=128`, 1 warmup run, Apple M2 Max:
 
 Notes:
 
-- `qwen3_5` currently supports `dflash` only, not `dtree`.
 - The better default for `qwen3_5` is `--draft-attention-mask none`.
 - The current `qwen3_5` path uses two imported ideas from `bstnxbt/dflash-mlx`: target-side hybrid rollback hooks and a context-only draft cache.
 - The 4B pair speeds up cleanly on this prompt. The 9B pair only gives a small local win on short prompts and still trails the best public MLX Qwen3.5 DFlash numbers.
 - On longer prompts, the imported hybrid-target path matters more. See [OPTIMIZATION_README.md](OPTIMIZATION_README.md).
+- `qwen3_5` now also has an experimental `dtree` path. It matches DFlash token output on a short greedy 4B check, but the current implementation is correctness-first and not optimized.
+- On a short Janet check with `--speculative-tokens 8 --tree-budget 8`, Qwen3.5-4B DTree reached `12.85` end-to-end TPS versus `21.54` for DFlash.
 
 ## Reproduce
 

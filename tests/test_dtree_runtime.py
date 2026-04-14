@@ -3,6 +3,7 @@ from __future__ import annotations
 import mlx.core as mx
 
 from dtree_mlx.dtree_runtime import build_dtree_tree, follow_verified_tree
+from dtree_mlx.qwen35_tree import build_node_lineages
 
 
 def test_build_dtree_tree_returns_prefix_closed_visibility():
@@ -43,3 +44,15 @@ def test_follow_verified_tree_walks_matching_children():
     accepted, next_token = follow_verified_tree(child_maps, [11, 21, 99, 0])
     assert accepted == [0, 1, 3]
     assert next_token == 0
+
+
+def test_build_node_lineages_returns_root_to_parent_paths():
+    parents = [-1, 0, 0, 1, 3, 2]
+    assert build_node_lineages(parents) == [
+        [],
+        [0],
+        [0],
+        [0, 1],
+        [0, 1, 3],
+        [0, 2],
+    ]
