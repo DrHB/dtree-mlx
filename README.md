@@ -11,7 +11,7 @@ This repo measures what each method delivers on the same hardware, same prompt s
 
 ## Speed
 
-Single-prompt head-to-head on Apple M2 Max (32 GB), Qwen3-4B-bf16 target + z-lab Qwen3-4B-DFlash draft. `temperature=0`, `max_new_tokens=512`, `speculative_tokens=16`, `tree_budget=24`, 1 warmup pass. Prompt is a gsm8k-style word problem.
+Single-prompt head-to-head on Apple M2 Max (32 GB), Qwen3-4B-bf16 target + z-lab Qwen3-4B-DFlash draft. `temperature=0`, `max_new_tokens=512`, `speculative_tokens=16`, `tree_budget=24`, 1 warmup pass. Prompt is a gsm8k-style word problem. For single-prompt numbers, use the single-mode CLI below so warmup is explicit and mode-order bias is avoided.
 
 | Method | Gen TPS | End-to-end TPS | Mean accept length | vs Vanilla |
 |---|---:|---:|---:|---:|
@@ -28,9 +28,14 @@ PROMPT="Janet's ducks lay 16 eggs per day. She eats three for breakfast every mo
 
 Please reason step by step, and put your final answer within \\boxed{}."
 
-# DFlash + DTree head-to-head
-uv run dtree-mlx-compare --prompt "$PROMPT" --max-new-tokens 512 \
-    --speculative-tokens 16 --tree-budget 24 --warmup-prompts 1
+# DFlash
+uv run dtree-mlx --prompt "$PROMPT" --decode-mode dflash \
+    --max-new-tokens 512 --speculative-tokens 16 --warmup-runs 1
+
+# DTree
+uv run dtree-mlx --prompt "$PROMPT" --decode-mode dtree \
+    --max-new-tokens 512 --speculative-tokens 16 \
+    --tree-budget 24 --warmup-runs 1
 
 # Vanilla MLX-LM baseline
 uv run dtree-mlx-bench --model mlx-community/Qwen3-4B-bf16 \
@@ -86,6 +91,8 @@ uv run dtree-mlx-compare \
     --speculative-tokens 16 \
     --tree-budget 24
 ```
+
+`dtree-mlx-compare` alternates the DFlash/DTree measurement order across prompts to reduce second-run bias. For a single prompt, prefer the per-mode `dtree-mlx` commands above.
 
 Supported datasets: `gsm8k`, `humaneval`, `math500`, `mbpp`, `mt-bench`.
 

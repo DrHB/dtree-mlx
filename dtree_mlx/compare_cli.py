@@ -10,7 +10,7 @@ from statistics import mean
 from huggingface_hub.utils import disable_progress_bars
 
 from .api import DEFAULT_DRAFT_MODEL, DEFAULT_TARGET_MODEL, DFlashGenerator
-from .benchmark_cli import load_prompts
+from .benchmark_cli import load_prompts, split_warmup_and_benchmark_prompts
 
 
 def parse_args() -> argparse.Namespace:
@@ -89,6 +89,12 @@ def summarize_mode(results: list[dict[str, float]]) -> dict[str, float]:
     }
 
 
+def benchmark_mode_order(prompt_index: int) -> tuple[str, str]:
+    if prompt_index % 2 == 1:
+        return ("dflash", "dtree")
+    return ("dtree", "dflash")
+
+
 def main() -> None:
     args = parse_args()
     if args.prompt is not None and args.prompt_file is not None:
@@ -100,11 +106,10 @@ def main() -> None:
     log = (lambda *items: None) if args.json else print
 
     prompts = load_prompts(args)
-    warmup = min(args.warmup_prompts, len(prompts) if args.prompt is None and args.prompt_file is None else 0)
-    warmup_prompts = prompts[:warmup]
-    benchmark_prompts = prompts[warmup:] if warmup else prompts
-    if not benchmark_prompts:
-        raise ValueError("No prompts left to benchmark after warmup.")
+    warmup_prompts, benchmark_prompts = split_warmup_and_benchmark_prompts(
+        prompts,
+        args.warmup_prompts,
+    )
 
     runner = DFlashGenerator(
         target_model=args.target_model,
@@ -116,9 +121,10 @@ def main() -> None:
     )
 
     mode_results: dict[str, list[dict[str, float]]] = {"dflash": [], "dtree": []}
-    for decode_mode in ("dflash", "dtree"):
-        log(f"[mode] {decode_mode}")
-        for warmup_idx, prompt in enumerate(warmup_prompts, start=1):
+    for warmup_idx, prompt in enumerate(warmup_prompts, start=1):
+        mode_order = benchmark_mode_order(warmup_idx)
+        log(f"[warmup prompt {warmup_idx}/{len(warmup_prompts)}] order={','.join(mode_order)}")
+        for decode_mode in mode_order:
             warm_result = runner.generate(
                 prompt_text=prompt,
                 max_new_tokens=args.max_new_tokens,
@@ -136,7 +142,10 @@ def main() -> None:
                 f"accept={warm_result.metrics['avg_acceptance_length']:.2f}"
             )
 
-        for index, prompt in enumerate(benchmark_prompts, start=1):
+    for index, prompt in enumerate(benchmark_prompts, start=1):
+        mode_order = benchmark_mode_order(index)
+        log(f"[prompt {index}/{len(benchmark_prompts)}] order={','.join(mode_order)}")
+        for decode_mode in mode_order:
             result = runner.generate(
                 prompt_text=prompt,
                 max_new_tokens=args.max_new_tokens,

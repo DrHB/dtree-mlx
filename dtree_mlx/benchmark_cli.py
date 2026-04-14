@@ -106,10 +106,11 @@ def load_and_process_dataset(name: str) -> list[dict]:
 
 
 def load_prompts(args: argparse.Namespace) -> list[str]:
+    repeated_prompt_count = max(args.num_prompts + args.warmup_prompts, 1)
     if args.prompt is not None:
-        return [args.prompt]
+        return [args.prompt] * repeated_prompt_count
     if args.prompt_file is not None:
-        return [Path(args.prompt_file).read_text()]
+        return [Path(args.prompt_file).read_text()] * repeated_prompt_count
 
     dataset = load_and_process_dataset(args.dataset)
     prompts = [dataset[i % len(dataset)]["turns"][0] for i in range(args.num_prompts + args.warmup_prompts)]
@@ -119,6 +120,18 @@ def load_prompts(args: argparse.Namespace) -> list[str]:
         rng.shuffle(prompts)
 
     return prompts
+
+
+def split_warmup_and_benchmark_prompts(
+    prompts: list[str],
+    warmup_prompts: int,
+) -> tuple[list[str], list[str]]:
+    warmup = min(max(warmup_prompts, 0), len(prompts))
+    warmup_slice = prompts[:warmup]
+    benchmark_slice = prompts[warmup:]
+    if not benchmark_slice:
+        raise ValueError("No prompts left to benchmark after warmup.")
+    return warmup_slice, benchmark_slice
 
 
 def build_prompt_tokens(tokenizer, user_prompt: str, enable_thinking: bool) -> list[int]:
@@ -278,9 +291,11 @@ def main() -> None:
     print(f"[load] {args.model}")
     model, tokenizer = load(args.model)
 
-    warmup = min(args.warmup_prompts, len(prompts) if args.prompt is None and args.prompt_file is None else 0)
-    warmup_prompts = prompts[:warmup]
-    benchmark_prompts = prompts[warmup:] if warmup else prompts
+    warmup_prompts, benchmark_prompts = split_warmup_and_benchmark_prompts(
+        prompts,
+        args.warmup_prompts,
+    )
+    warmup = len(warmup_prompts)
     prompt_source = (
         "prompt"
         if args.prompt is not None
@@ -288,9 +303,6 @@ def main() -> None:
         if args.prompt_file is not None
         else "dataset"
     )
-
-    if not benchmark_prompts:
-        raise ValueError("No prompts left to benchmark after warmup.")
 
     for index, prompt in enumerate(warmup_prompts, start=1):
         prompt_tokens = build_prompt_tokens(tokenizer, prompt, args.enable_thinking)
