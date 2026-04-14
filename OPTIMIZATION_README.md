@@ -112,9 +112,9 @@ Local Janet prompt check, `temperature=0`, `max_new_tokens=128`, 1 warmup run:
 | Model | Method | Gen TPS | End-to-end TPS | Mean accept |
 |---|---|---:|---:|---:|
 | Qwen3.5-4B | Plain MLX-LM | 37.05 | 33.46 | — |
-| Qwen3.5-4B | DFlash | 47.93 | 44.93 | 5.12 |
+| Qwen3.5-4B | DFlash | 48.27 | 45.30 | 5.12 |
 | Qwen3.5-9B | Plain MLX-LM | 18.97 | 17.40 | — |
-| Qwen3.5-9B | DFlash | 20.47 | 19.56 | 4.19 |
+| Qwen3.5-9B | DFlash | 20.27 | 19.38 | 4.03 |
 
 Reference fork checked on the same prompt:
 
@@ -126,8 +126,12 @@ Reference fork checked on the same prompt:
 Takeaways:
 
 - On our current code, `qwen3_5` does better with `draft_attention_mask=none` than `causal`.
-- A direct port of the reference draft-side cache/attention rewrite did not help here and regressed 9B, so it was removed.
-- The remaining 9B gap is probably not “just one draft kernel.” The bigger missing pieces are on the target-side hybrid attention path:
-  - recurrent rollback cache
-  - split full-attention SDPA
-  - exact small-projection handling
+- The current repo keeps two imported Qwen3.5 ideas from `bstnxbt/dflash-mlx`:
+  - target-side hybrid rollback / split-attention hooks
+  - a context-only draft cache
+- On short prompts, 4B improves cleanly while 9B only improves a little.
+- On a long synthetic 9B prompt (`~220` repeated reasoning sentences, `max_new_tokens=64`), current local results were:
+  - our repo, `draft.cache_mode=kv`: `18.00` gen TPS, `4.75` e2e TPS, `4.12` mean accept
+  - our repo, `draft.cache_mode=context-only`: `19.24` gen TPS, `4.79` e2e TPS, `4.40` mean accept
+  - `bstnxbt/dflash-mlx`: `17.46` gen TPS, `4.84` e2e TPS, `3.76` tokens/cycle
+- So the imported hybrid-target path helps more on long prefixes than on the short Janet prompt.

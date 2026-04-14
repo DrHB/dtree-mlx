@@ -50,6 +50,57 @@ def peak_memory_gb() -> float:
     return mx.get_peak_memory() / 1e9
 
 
+def uses_cache_rollback(cache: list[Any]) -> bool:
+    return any(hasattr(layer_cache, "rollback") for layer_cache in cache)
+
+
+def arm_target_rollback_with_prefix(
+    cache: list[Any],
+    *,
+    prefix_len: int,
+) -> None:
+    for layer_cache in cache:
+        arm = getattr(layer_cache, "arm_rollback", None)
+        if arm is not None:
+            arm(prefix_len=int(prefix_len))
+
+
+def clear_target_rollback_state(cache: list[Any]) -> None:
+    for layer_cache in cache:
+        clear = getattr(layer_cache, "clear_rollback_state", None)
+        if clear is not None:
+            clear()
+            continue
+        if hasattr(layer_cache, "_armed"):
+            layer_cache._armed = False
+        for attr_name in ("_tape", "_tape_k", "_tape_g", "_tape_qkv", "_snapshot"):
+            if hasattr(layer_cache, attr_name):
+                setattr(layer_cache, attr_name, None)
+
+
+def restore_target_caches_after_verify(
+    cache: list[Any],
+    *,
+    accepted_inputs: int,
+    draft_block_size: int,
+) -> None:
+    fully_accepted = accepted_inputs >= draft_block_size
+    trim_count = max(draft_block_size - accepted_inputs, 0)
+    for layer_cache in cache:
+        rollback = getattr(layer_cache, "rollback", None)
+        if rollback is not None:
+            if fully_accepted:
+                clear = getattr(layer_cache, "clear_rollback_state", None)
+                if clear is not None:
+                    clear()
+            else:
+                rollback(max(accepted_inputs - 1, 0))
+            continue
+        trim = getattr(layer_cache, "trim", None)
+        if trim is not None and trim_count > 0:
+            trim(trim_count)
+
+
 def profile_start(profile: dict[str, float] | None) -> float:
     return time.perf_counter() if profile is not None else 0.0
 
@@ -141,16 +192,25 @@ def verify_block_parallel_replay(
 
     if accepted_inputs < draft_block_size:
         rollback_start = profile_start(profile)
-        rollback_tensors = flatten_rollback_tensors(rollback_records)
-        if rollback_tensors:
-            mx.eval(*rollback_tensors)
-        target.rewind_kv_caches(target_cache, draft_block_size - accepted_inputs)
-        target.rollback_linear_caches(
-            target_cache,
-            rollback_records,
-            accepted_inputs,
-        )
+        if uses_cache_rollback(target_cache):
+            restore_target_caches_after_verify(
+                target_cache,
+                accepted_inputs=accepted_inputs,
+                draft_block_size=draft_block_size,
+            )
+        else:
+            rollback_tensors = flatten_rollback_tensors(rollback_records)
+            if rollback_tensors:
+                mx.eval(*rollback_tensors)
+            target.rewind_kv_caches(target_cache, draft_block_size - accepted_inputs)
+            target.rollback_linear_caches(
+                target_cache,
+                rollback_records,
+                accepted_inputs,
+            )
         add_profile_elapsed(profile, "verify_rollback_time_s", rollback_start)
+    elif uses_cache_rollback(target_cache):
+        clear_target_rollback_state(target_cache)
 
     return accepted_inputs, posterior[matched], verifier_hidden[:, :accepted_inputs, :]
 
@@ -221,16 +281,25 @@ def verify_block_parallel_lazy_logits(
 
     if accepted_inputs < draft_block_size:
         rollback_start = profile_start(profile)
-        rollback_tensors = flatten_rollback_tensors(rollback_records)
-        if rollback_tensors:
-            mx.eval(*rollback_tensors)
-        target.rewind_kv_caches(target_cache, draft_block_size - accepted_inputs)
-        target.rollback_linear_caches(
-            target_cache,
-            rollback_records,
-            accepted_inputs,
-        )
+        if uses_cache_rollback(target_cache):
+            restore_target_caches_after_verify(
+                target_cache,
+                accepted_inputs=accepted_inputs,
+                draft_block_size=draft_block_size,
+            )
+        else:
+            rollback_tensors = flatten_rollback_tensors(rollback_records)
+            if rollback_tensors:
+                mx.eval(*rollback_tensors)
+            target.rewind_kv_caches(target_cache, draft_block_size - accepted_inputs)
+            target.rollback_linear_caches(
+                target_cache,
+                rollback_records,
+                accepted_inputs,
+            )
         add_profile_elapsed(profile, "verify_rollback_time_s", rollback_start)
+    elif uses_cache_rollback(target_cache):
+        clear_target_rollback_state(target_cache)
 
     return accepted_inputs, posterior_token, verifier_hidden[:, :accepted_inputs, :]
 
@@ -270,16 +339,25 @@ def verify_block_parallel_greedy_argmax(
 
     if accepted_inputs < draft_block_size:
         rollback_start = profile_start(profile)
-        rollback_tensors = flatten_rollback_tensors(rollback_records)
-        if rollback_tensors:
-            mx.eval(*rollback_tensors)
-        target.rewind_kv_caches(target_cache, draft_block_size - accepted_inputs)
-        target.rollback_linear_caches(
-            target_cache,
-            rollback_records,
-            accepted_inputs,
-        )
+        if uses_cache_rollback(target_cache):
+            restore_target_caches_after_verify(
+                target_cache,
+                accepted_inputs=accepted_inputs,
+                draft_block_size=draft_block_size,
+            )
+        else:
+            rollback_tensors = flatten_rollback_tensors(rollback_records)
+            if rollback_tensors:
+                mx.eval(*rollback_tensors)
+            target.rewind_kv_caches(target_cache, draft_block_size - accepted_inputs)
+            target.rollback_linear_caches(
+                target_cache,
+                rollback_records,
+                accepted_inputs,
+            )
         add_profile_elapsed(profile, "verify_rollback_time_s", rollback_start)
+    elif uses_cache_rollback(target_cache):
+        clear_target_rollback_state(target_cache)
 
     return accepted_inputs, posterior[matched], verifier_hidden[:, :accepted_inputs, :]
 
@@ -362,7 +440,13 @@ def dflash_generate(
     verify_chunk_size: int,
     profile: bool = False,
 ) -> tuple[list[int], dict[str, Any]]:
-    target_cache = target.make_cache()
+    use_speculative_linear_cache = (
+        target.adapter.family == "qwen3_5"
+        and verify_mode in {"parallel-replay", "parallel-lazy-logits", "parallel-greedy-argmax"}
+    )
+    target_cache = target.make_cache(
+        speculative_linear_cache=use_speculative_linear_cache
+    )
     draft_cache = draft.make_cache()
     profile_times: dict[str, float] | None = {} if profile else None
     total_max_tokens = int(prompt_tokens.shape[0]) + max_new_tokens
@@ -405,6 +489,9 @@ def dflash_generate(
         drafted_suffix = drafted_tokens[0].tolist()
         block_tokens[1:] = drafted_suffix[: block_size - 1]
         add_profile_elapsed(profile_times, "draft_time_s", draft_start)
+
+        if use_speculative_linear_cache:
+            arm_target_rollback_with_prefix(target_cache, prefix_len=start)
 
         verify_start = profile_start(profile_times)
         if verify_mode == "stream":

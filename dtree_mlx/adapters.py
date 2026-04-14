@@ -12,6 +12,7 @@ from mlx_lm.models import cache as cache_lib
 from mlx_lm.models import qwen3
 
 from .model_prep import prepare_custom_model
+from .qwen35_target import make_target_cache as make_qwen35_target_cache
 from .qwen3_tree import forward_transformer_block_with_position_ids
 
 
@@ -34,7 +35,12 @@ class MLXTargetAdapter:
     def stop_token_ids(self, tokenizer) -> set[int]:
         raise NotImplementedError
 
-    def make_cache(self, model) -> list[Any]:
+    def make_cache(
+        self,
+        model,
+        speculative_linear_cache: bool = False,
+    ) -> list[Any]:
+        del speculative_linear_cache
         return model.make_cache()
 
     def embed_tokens(self, model, tokens: mx.array) -> mx.array:
@@ -182,6 +188,16 @@ class Qwen35TargetAdapter(MLXTargetAdapter):
             return {eos_token_ids}
         return set(eos_token_ids)
 
+    def make_cache(
+        self,
+        model,
+        speculative_linear_cache: bool = False,
+    ) -> list[Any]:
+        return make_qwen35_target_cache(
+            model,
+            enable_speculative_linear_cache=speculative_linear_cache,
+        )
+
     def embed_tokens(self, model, tokens: mx.array) -> mx.array:
         return model.language_model.model.embed_tokens(tokens)
 
@@ -300,8 +316,13 @@ class Qwen35TargetAdapter(MLXTargetAdapter):
         for idx, layer_cache in enumerate(cache):
             if isinstance(layer_cache, cache_lib.KVCache):
                 parts.append(f"{idx}:kv={layer_cache.offset}")
-            elif isinstance(layer_cache, cache_lib.ArraysCache):
-                recurrent = None if layer_cache[1] is None else tuple(layer_cache[1].shape)
+            else:
+                recurrent = None
+                try:
+                    state = layer_cache[1]
+                    recurrent = None if state is None else tuple(state.shape)
+                except Exception:
+                    pass
                 parts.append(f"{idx}:ssm={recurrent}")
         return " ".join(parts)
 
@@ -333,7 +354,12 @@ class Qwen3TargetAdapter(MLXTargetAdapter):
             return {eos_token_ids}
         return set(eos_token_ids)
 
-    def make_cache(self, model) -> list[Any]:
+    def make_cache(
+        self,
+        model,
+        speculative_linear_cache: bool = False,
+    ) -> list[Any]:
+        del speculative_linear_cache
         return [cache_lib.KVCache() for _ in model.layers]
 
     def embed_tokens(self, model, tokens: mx.array) -> mx.array:
@@ -543,8 +569,14 @@ class LoadedTargetModel:
     def stop_token_ids(self) -> set[int]:
         return self.adapter.stop_token_ids(self.tokenizer)
 
-    def make_cache(self) -> list[Any]:
-        return self.adapter.make_cache(self.model)
+    def make_cache(
+        self,
+        speculative_linear_cache: bool = False,
+    ) -> list[Any]:
+        return self.adapter.make_cache(
+            self.model,
+            speculative_linear_cache=speculative_linear_cache,
+        )
 
     def embed_tokens(self, tokens: mx.array) -> mx.array:
         return self.adapter.embed_tokens(self.model, tokens)

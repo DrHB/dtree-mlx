@@ -41,15 +41,17 @@ Janet prompt, `temperature=0`, `max_new_tokens=128`, 1 warmup run, Apple M2 Max:
 | Model | Method | Gen TPS | End-to-end TPS | Mean accept |
 |---|---|---:|---:|---:|
 | Qwen3.5-4B | Plain MLX-LM | 37.05 | 33.46 | — |
-| Qwen3.5-4B | DFlash | 47.93 | 44.93 | 5.12 |
+| Qwen3.5-4B | DFlash | 48.27 | 45.30 | 5.12 |
 | Qwen3.5-9B | Plain MLX-LM | 18.97 | 17.40 | — |
-| Qwen3.5-9B | DFlash | 20.47 | 19.56 | 4.19 |
+| Qwen3.5-9B | DFlash | 20.27 | 19.38 | 4.03 |
 
 Notes:
 
 - `qwen3_5` currently supports `dflash` only, not `dtree`.
 - The better default for `qwen3_5` is `--draft-attention-mask none`.
-- The 4B pair speeds up cleanly on this prompt. The 9B pair only gives a small local win and still trails the best public MLX Qwen3.5 DFlash numbers.
+- The current `qwen3_5` path uses two imported ideas from `bstnxbt/dflash-mlx`: target-side hybrid rollback hooks and a context-only draft cache.
+- The 4B pair speeds up cleanly on this prompt. The 9B pair only gives a small local win on short prompts and still trails the best public MLX Qwen3.5 DFlash numbers.
+- On longer prompts, the imported hybrid-target path matters more. See [OPTIMIZATION_README.md](OPTIMIZATION_README.md).
 
 ## Reproduce
 
@@ -182,6 +184,7 @@ uv run pytest tests/ -v
 
 - DFlash paper and draft checkpoints: https://github.com/z-lab/dflash
 - Original MLX DFlash port: https://github.com/Aryagm/dflash-mlx
+- Qwen3.5 hybrid-attention hooks and kernels adapted from: https://github.com/bstnxbt/dflash-mlx
 - DDTree reference implementation: https://github.com/liranringel/ddtree
 - MLX / mlx-lm: https://github.com/ml-explore/mlx and https://github.com/ml-explore/mlx-lm
 

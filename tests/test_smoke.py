@@ -115,7 +115,7 @@ def test_qwen35_adapter_is_registered():
 def test_generator_auto_mask_uses_target_family(monkeypatch):
     from dtree_mlx import api
 
-    def build_generator(family: str) -> str:
+    def build_generator(family: str) -> tuple[str, str]:
         fake_target = SimpleNamespace(
             adapter=SimpleNamespace(family=family),
             model=object(),
@@ -138,7 +138,7 @@ def test_generator_auto_mask_uses_target_family(monkeypatch):
             lambda draft, bits, group_size: {},
         )
         generator = api.DFlashGenerator()
-        return generator.draft_attention_mask
+        return generator.draft_attention_mask, generator.draft.cache_mode
 
-    assert build_generator("qwen3") == "none"
-    assert build_generator("qwen3_5") == "none"
+    assert build_generator("qwen3") == ("none", "kv")
+    assert build_generator("qwen3_5") == ("none", "context-only")

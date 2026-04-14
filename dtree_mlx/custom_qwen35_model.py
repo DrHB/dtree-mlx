@@ -208,6 +208,8 @@ def forward_full_attention_layer_dflash(
     mask: mx.array | None,
     cache: KVCache | None,
 ) -> mx.array:
+    if getattr(layer.self_attn, "_dflash_split_sdpa_enabled", False):
+        return layer(hidden_states, mask=mask, cache=cache)
     if (
         cache is not None
         and cache.keys is not None
@@ -974,7 +976,11 @@ class Qwen3_5TextModel(nn.Module):
 
         for idx, (layer, layer_cache) in enumerate(zip(self.layers, cache)):
             mask = ssm_mask if layer.is_linear else fa_mask
-            if return_rollback_records and layer.is_linear:
+            if (
+                return_rollback_records
+                and layer.is_linear
+                and not hasattr(layer_cache, "rollback")
+            ):
                 hidden_states, rollback_record = forward_linear_layer_with_rollback_record(
                     layer,
                     hidden_states,

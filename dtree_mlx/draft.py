@@ -66,6 +66,57 @@ class DraftArgs:
         return cls(**{key: config[key] for key in keys if key in config})
 
 
+class ContextOnlyDraftKVCache:
+    def __init__(self, sink_size: int = 64, window_size: int = 1024):
+        self.sink_size = int(sink_size)
+        self.window_size = int(window_size)
+        self.keys: mx.array | None = None
+        self.values: mx.array | None = None
+        self.offset = 0
+
+    def append_context(
+        self,
+        context_keys: mx.array,
+        context_values: mx.array,
+        num_positions: int,
+    ) -> None:
+        if context_keys is None or context_values is None or int(num_positions) <= 0:
+            return
+        if self.keys is None:
+            self.keys = context_keys
+            self.values = context_values
+        else:
+            self.keys = mx.concatenate([self.keys, context_keys], axis=2)
+            self.values = mx.concatenate([self.values, context_values], axis=2)
+        self.offset += int(num_positions)
+        self._apply_window()
+
+    def _apply_window(self) -> None:
+        if self.keys is None or self.values is None:
+            return
+        cache_len = int(self.keys.shape[2])
+        max_len = self.sink_size + self.window_size
+        if cache_len <= max_len:
+            return
+        sink_keys = self.keys[:, :, : self.sink_size, :]
+        sink_values = self.values[:, :, : self.sink_size, :]
+        window_keys = self.keys[:, :, -self.window_size :, :]
+        window_values = self.values[:, :, -self.window_size :, :]
+        self.keys = mx.concatenate([sink_keys, window_keys], axis=2)
+        self.values = mx.concatenate([sink_values, window_values], axis=2)
+
+    def fetch(self) -> tuple[mx.array | None, mx.array | None]:
+        return self.keys, self.values
+
+    def trim(self, num_tokens: int) -> None:
+        del num_tokens
+
+
+def _is_quantized_linear(module: Any) -> bool:
+    quantized_cls = getattr(nn, "QuantizedLinear", None)
+    return quantized_cls is not None and isinstance(module, quantized_cls)
+
+
 class DFlashAttention(nn.Module):
     def __init__(self, args: DraftArgs):
         super().__init__()
@@ -110,48 +161,92 @@ class DFlashAttention(nn.Module):
         self,
         hidden_states: mx.array,
         target_hidden: mx.array,
-        cache: cache_lib.KVCache | None = None,
+        cache: cache_lib.KVCache | ContextOnlyDraftKVCache | None = None,
     ) -> mx.array:
         batch_size, query_len, _ = hidden_states.shape
-        context_len = target_hidden.shape[1]
+        context_len = int(target_hidden.shape[1])
 
         queries = self.q_proj(hidden_states)
         queries = self.q_norm(
             queries.reshape(batch_size, query_len, self.n_heads, self.head_dim)
         ).transpose(0, 2, 1, 3)
 
-        kv_states = mx.concatenate([target_hidden, hidden_states], axis=1)
-        keys = self.k_proj(kv_states)
-        values = self.v_proj(kv_states)
-        keys = self.k_norm(
-            keys.reshape(
+        context_keys = self.k_proj(target_hidden)
+        context_keys = self.k_norm(
+            context_keys.reshape(
                 batch_size,
-                context_len + query_len,
+                context_len,
                 self.n_kv_heads,
                 self.head_dim,
             )
         ).transpose(0, 2, 1, 3)
-        values = values.reshape(
+        context_values = self.v_proj(target_hidden).reshape(
             batch_size,
-            context_len + query_len,
+            context_len,
+            self.n_kv_heads,
+            self.head_dim,
+        ).transpose(0, 2, 1, 3)
+        noise_keys = self.k_proj(hidden_states)
+        noise_keys = self.k_norm(
+            noise_keys.reshape(
+                batch_size,
+                query_len,
+                self.n_kv_heads,
+                self.head_dim,
+            )
+        ).transpose(0, 2, 1, 3)
+        noise_values = self.v_proj(hidden_states).reshape(
+            batch_size,
+            query_len,
             self.n_kv_heads,
             self.head_dim,
         ).transpose(0, 2, 1, 3)
 
         if cache is not None:
-            queries = self.rope(queries, offset=cache.offset + context_len)
-            keys = self.rope(keys, offset=cache.offset)
-            keys, values = cache.update_and_fetch(keys, values)
+            if isinstance(cache, ContextOnlyDraftKVCache):
+                cache_offset = int(cache.offset)
+                query_offset = cache_offset + context_len
+                queries = self.rope(queries, offset=query_offset)
+                context_keys = self.rope(context_keys, offset=cache_offset)
+                noise_keys = self.rope(noise_keys, offset=query_offset)
+
+                cache.append_context(context_keys, context_values, context_len)
+                cached_keys, cached_values = cache.fetch()
+                keys = mx.concatenate([cached_keys, noise_keys], axis=-2)
+                values = mx.concatenate([cached_values, noise_values], axis=-2)
+            else:
+                queries = self.rope(queries, offset=cache.offset + context_len)
+                context_keys = self.rope(context_keys, offset=cache.offset)
+                noise_keys = self.rope(noise_keys, offset=cache.offset + context_len)
+                keys = mx.concatenate([context_keys, noise_keys], axis=-2)
+                values = mx.concatenate([context_values, noise_values], axis=-2)
+                keys, values = cache.update_and_fetch(keys, values)
         else:
             queries = self.rope(queries, offset=context_len)
-            keys = self.rope(keys)
+            context_keys = self.rope(context_keys, offset=0)
+            noise_keys = self.rope(noise_keys, offset=context_len)
+            if hasattr(mx.fast, "dflash_cross_attention"):
+                output = mx.fast.dflash_cross_attention(
+                    queries,
+                    context_keys,
+                    context_values,
+                    noise_keys,
+                    noise_values,
+                    scale=self.scale,
+                )
+                output = output.transpose(0, 2, 1, 3).reshape(batch_size, query_len, -1)
+                return self.o_proj(output)
+            keys = mx.concatenate([context_keys, noise_keys], axis=-2)
+            values = mx.concatenate([context_values, noise_values], axis=-2)
 
-        mask = "causal" if self.mask_mode == "causal" and query_len > 1 else None
+        mask = None
+        if not isinstance(cache, ContextOnlyDraftKVCache):
+            mask = "causal" if self.mask_mode == "causal" and query_len > 1 else None
         output = scaled_dot_product_attention(
             queries,
             keys,
             values,
-            cache=cache,
+            cache=None if isinstance(cache, ContextOnlyDraftKVCache) else cache,
             scale=self.scale,
             mask=mask,
         )
@@ -174,7 +269,7 @@ class DFlashDecoderLayer(nn.Module):
         self,
         hidden_states: mx.array,
         target_hidden: mx.array,
-        cache: cache_lib.KVCache | None = None,
+        cache: cache_lib.KVCache | ContextOnlyDraftKVCache | None = None,
     ) -> mx.array:
         residual = hidden_states
         hidden_states = self.input_layernorm(hidden_states)
@@ -183,7 +278,17 @@ class DFlashDecoderLayer(nn.Module):
 
         residual = hidden_states
         hidden_states = self.post_attention_layernorm(hidden_states)
-        hidden_states = self.mlp(hidden_states)
+        if hasattr(mx.fast, "dflash_gated_mlp") and not _is_quantized_linear(
+            self.mlp.gate_proj
+        ):
+            hidden_states = mx.fast.dflash_gated_mlp(
+                hidden_states,
+                self.mlp.gate_proj.weight,
+                self.mlp.up_proj.weight,
+                self.mlp.down_proj.weight,
+            )
+        else:
+            hidden_states = self.mlp(hidden_states)
         return residual + hidden_states
 
 
@@ -203,8 +308,11 @@ class DFlashDraftModel(nn.Module):
         self.block_size = args.block_size
         self.mask_token_id = int(args.dflash_config["mask_token_id"])
         self.attention_mask_mode = "none"
+        self.cache_mode = "kv"
 
-    def make_cache(self) -> list[cache_lib.KVCache]:
+    def make_cache(self) -> list[cache_lib.KVCache | ContextOnlyDraftKVCache]:
+        if self.cache_mode == "context-only":
+            return [ContextOnlyDraftKVCache() for _ in self.layers]
         return [cache_lib.KVCache() for _ in self.layers]
 
     def __call__(

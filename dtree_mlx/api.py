@@ -59,6 +59,9 @@ class DFlashGenerator:
             draft_attention_mask = "none"
         self.draft_attention_mask = draft_attention_mask
         self.draft.attention_mask_mode = draft_attention_mask
+        self.draft.cache_mode = (
+            "context-only" if self.target.adapter.family == "qwen3_5" else "kv"
+        )
         self.draft_quantization = maybe_quantize_draft_model(
             self.draft,
             bits=draft_quant_bits,
