@@ -10,58 +10,60 @@
 | Main Qwen3.5 drafts | `z-lab/Qwen3.5-4B-DFlash`, `z-lab/Qwen3.5-9B-DFlash` |
 | Decode setting | `temperature=0` |
 | Hard constraint | Current Qwen3 draft is `b16`, so runtime clamps `--speculative-tokens` to `16` |
+| Primary score | `end_to_end_tps / matched_dflash_end_to_end_tps` when a head-to-head DFlash baseline exists |
+| Commit policy | Historical rows may point to the commit that recorded or landed the result; new experiments should get their own commit |
 
-| Track | Setting | Gen TPS | End-to-end TPS | Mean accept | Decision |
-|---|---|---:|---:|---:|---|
-| Qwen3 baseline | 8 gsm8k prompts, 2 warmups, plain | 36.42 | 34.98 | — | Reference |
-| Qwen3 baseline | 8 gsm8k prompts, 2 warmups, DFlash `parallel-greedy-argmax` | 51.87 | 50.31 | 5.71 | Keep |
-| Qwen3 baseline | 8 gsm8k prompts, 2 warmups, DTree `spec=16 tree_budget=24` | 56.68 | 54.83 | 7.17 | Keep |
-| Qwen3 q4 | 8 gsm8k prompts, DFlash `q4_g64` | — | 47.36 | — | Opt-in only |
-| Qwen3 q4 | 8 gsm8k prompts, DTree `q4_g64` | — | 56.09 | — | Opt-in only |
-| Qwen3.5-4B | Janet, DFlash | 48.27 | 45.30 | 5.12 | Reference |
-| Qwen3.5-4B | Janet, DTree lazy bf16 `spec=8 tree_budget=8` | 29.39 | 28.19 | 6.33 | Better, still behind DFlash |
-| Qwen3.5-4B | 8 gsm8k prompts, DFlash `q4_g64 spec=16` | 47.39 | 45.07 | 5.81 | Reference |
-| Qwen3.5-4B | 8 gsm8k prompts, DTree lazy `q4_g64 spec=16 tree_budget=24` | 50.55 | 48.31 | 6.95 | Keep |
-| Qwen3.5-9B | Janet, DFlash | 20.27 | 19.38 | 4.03 | Keep |
+| Track | Setting | Gen TPS | End-to-end TPS | Mean accept | Score | Decision |
+|---|---|---:|---:|---:|---:|---|
+| Qwen3 baseline | 8 gsm8k prompts, 2 warmups, plain | 36.42 | 34.98 | — | 0.70x | Reference |
+| Qwen3 baseline | 8 gsm8k prompts, 2 warmups, DFlash `parallel-greedy-argmax` | 51.87 | 50.31 | 5.71 | 1.00x | Keep |
+| Qwen3 baseline | 8 gsm8k prompts, 2 warmups, DTree `spec=16 tree_budget=24` | 56.68 | 54.83 | 7.17 | 1.09x | Keep |
+| Qwen3 q4 | 8 gsm8k prompts, DFlash `q4_g64` | — | 47.36 | — | 1.00x | Opt-in only |
+| Qwen3 q4 | 8 gsm8k prompts, DTree `q4_g64` | — | 56.09 | — | 1.18x | Opt-in only |
+| Qwen3.5-4B | Janet, DFlash | 48.27 | 45.30 | 5.12 | 1.00x | Reference |
+| Qwen3.5-4B | Janet, DTree lazy bf16 `spec=8 tree_budget=8` | 29.39 | 28.19 | 6.33 | 0.62x | Better, still behind DFlash |
+| Qwen3.5-4B | 8 gsm8k prompts, DFlash `q4_g64 spec=16` | 47.39 | 45.07 | 5.81 | 1.00x | Reference |
+| Qwen3.5-4B | 8 gsm8k prompts, DTree lazy `q4_g64 spec=16 tree_budget=24` | 50.55 | 48.31 | 6.95 | 1.07x | Keep |
+| Qwen3.5-9B | Janet, DFlash | 20.27 | 19.38 | 4.03 | 1.00x | Keep |
 
-| Area | Experiment | Change | Result | Decision |
+| Commit | Area | Experiment | Change | Result | Score | Decision |
+|---|---|---|---|---|---|---|
+| `74db97d` | Plumbing | Benchmark warmup and ordering | Fixed prompt warmup handling and alternating compare order | Removed misleading single-prompt numbers | — | Keep |
+| `5943b2d` | Qwen3 DFlash | Fast exact verifier | `parallel-greedy-argmax` instead of `parallel-replay` | Large speedup on Qwen3 at `temperature=0` | 1.00x | Keep |
+| `068f6b9` | Qwen3 DTree | Fixed budget sweep | Swept fixed budgets under `b16` clamp | `tree_budget=24` was best local fixed point | 1.09x | Keep |
+| `895f9ef` | Qwen3 target | Target quantization | `--target-quant-bits 4 --target-quant-group-size 64` | Helped DTree, hurt DFlash | 1.18x | Keep opt-in |
+| `895f9ef` | Qwen3 target | 8-bit target quantization | `--target-quant-bits 8` | Worse than bf16 / q4 path | <1.00x | Drop |
+| `local-only` | Qwen3 DTree | Adaptive tree budget | Dynamic budget by confidence | Slower than fixed budget | <1.00x | Drop |
+| `local-only` | Qwen3 DTree | Hybrid DFlash/DTree routing | Switched between linear and tree verify | Slower than fixed modes | <1.00x | Drop |
+| `local-only` | Qwen3 DTree | Depth-penalized scoring | Penalized deeper branches | No broad win | ~1.00x | Drop |
+| `local-only` | Qwen3 DTree | Wider candidate pools | Increased branch candidate pool | No broad win | ~1.00x | Drop |
+| `local-only` | Qwen3 DTree | Single-fork tree | Narrower tree shape | Worse | <1.00x | Drop |
+| `a765a56` | Qwen3 DTree | DTree greedy verifier | Honored `parallel-greedy-argmax` in tree path | Exact, but not faster | <1.00x | Drop |
+| `local-only` | Qwen3 runtime | Hidden-state concat cleanup | Avoided some eager concatenation | Flat | ~1.00x | Drop |
+| `local-only` | Qwen3 runtime | Broader MLX verifier fusion | More aggressive compiled verifier path | Flat to worse | <=1.00x | Drop |
+| `e6ea8b4` | Qwen3.5 support | Qwen3.5 adapter port | Added `qwen3_5` DFlash support | Functional 4B and 9B path | 1.00x | Keep |
+| `e6ea8b4` | Qwen3.5 DFlash | Draft attention mask | Compared `none` vs `causal` | `none` is better | >1.00x | Keep |
+| `f34a01f` | Qwen3.5 DFlash | Imported hybrid hooks | Ported rollback hooks, split attention, context-only draft cache from `bstnxbt/dflash-mlx` | Helped, especially on long prefixes | >1.00x on longer prefixes | Keep |
+| `eb0d95c` | Qwen3.5 DFlash | Draft KV precompute | Precomputed context K/V and query-only draft attention | Correct, basically flat | ~1.00x | Keep as cleanup |
+| `local-only` | Qwen3.5 DFlash | Fused all-layer draft K/V | Tried more aggressive fused draft projection | Worse | <1.00x | Drop |
+| `f34a01f` | Qwen3.5 DFlash | 9B target-side hook import | Imported 9B hybrid-target tricks | Short-prompt gain modest, long-prefix path better | >1.00x on longer prefixes | Keep |
+| `31c348e` | Qwen3.5 DTree | Initial correctness-first tree | Full-tree exact verifier over hybrid caches | Exact, very slow | ~0.38x | Replaced |
+| `a3f43f0` | Qwen3.5 DTree | Full-attention tree batching | Ran full-attention tree layers over whole tree block | Real win, but not enough alone | ~0.47x | Keep in full-tree path |
+| `local-only` | Qwen3.5 DTree | Compiled recurrent breadth path | Compiled breadth-by-depth recurrent tree layer | Flat to worse | <=1.00x | Drop |
+| `local-only` | Qwen3.5 DTree | Sequential exact tree | Walked real cache state branch-by-branch | Modest gain, memory-heavy | ~0.79x on Janet q4 | Drop |
+| `e286574` | Qwen3.5 DTree | Lazy exact verifier | Verified only the branch the target follows | First real 4B DTree win on broader speed slice | 1.07x | Keep default |
+| `e286574` | Qwen3.5 DTree | Full-tree fallback | `DTREE_QWEN35_TREE_MODE=full_tree` | Useful for comparison only | 0.62x | Keep fallback |
+| `d61ba98` | Qwen3.5 DTree | Small-tree q4 setting | `q4_g64 spec=16 tree_budget=2` | Won short Janet, lost broader sweep | 1.05x short / 0.86x broad | Drop |
+| `e286574` | Qwen3.5 DTree | Lazy-budget sweep | Lazy path with `spec=16` and larger budgets | `tree_budget=24` best local point; bigger trees fell back | 1.07x | Keep `24` |
+| `e286574` | Qwen3.5 DTree | q4 correctness sanity | `N=12`, `q4_g64 spec=16 tree_budget=24` | Plain `11/12`, DFlash `12/12`, DTree lazy `11/12` | 1.07x speed / 0.92x acc | Speed win, not accuracy win |
+| `e286574` | Qwen3.5 DTree | Short greedy exactness | 24-token q4 greedy check vs DFlash | Token-for-token match | Exactness confidence | Keep confidence |
+| `e286574` | Qwen3.5 DTree | Tree verified-node accounting | Lazy path counts verified nodes on followed path | Verified nodes now track acceptance length instead of fixed `tree_budget + 1` | Lower verifier work | Keep |
+
+| Validation | Setting | Result | Score | Decision |
 |---|---|---|---|---|
-| Plumbing | Benchmark warmup and ordering | Fixed prompt warmup handling and alternating compare order | Removed misleading single-prompt numbers | Keep |
-| Qwen3 DFlash | Fast exact verifier | `parallel-greedy-argmax` instead of `parallel-replay` | Large speedup on Qwen3 at `temperature=0` | Keep |
-| Qwen3 DTree | Fixed budget sweep | Swept fixed budgets under `b16` clamp | `tree_budget=24` was best local fixed point | Keep |
-| Qwen3 target | Target quantization | `--target-quant-bits 4 --target-quant-group-size 64` | Helped DTree, hurt DFlash | Keep opt-in |
-| Qwen3 target | 8-bit target quantization | `--target-quant-bits 8` | Worse than bf16 / q4 path | Drop |
-| Qwen3 DTree | Adaptive tree budget | Dynamic budget by confidence | Slower than fixed budget | Drop |
-| Qwen3 DTree | Hybrid DFlash/DTree routing | Switched between linear and tree verify | Slower than fixed modes | Drop |
-| Qwen3 DTree | Depth-penalized scoring | Penalized deeper branches | No broad win | Drop |
-| Qwen3 DTree | Wider candidate pools | Increased branch candidate pool | No broad win | Drop |
-| Qwen3 DTree | Single-fork tree | Narrower tree shape | Worse | Drop |
-| Qwen3 DTree | DTree greedy verifier | Honored `parallel-greedy-argmax` in tree path | Exact, but not faster | Drop |
-| Qwen3 runtime | Hidden-state concat cleanup | Avoided some eager concatenation | Flat | Drop |
-| Qwen3 runtime | Broader MLX verifier fusion | More aggressive compiled verifier path | Flat to worse | Drop |
-| Qwen3.5 support | Qwen3.5 adapter port | Added `qwen3_5` DFlash support | Functional 4B and 9B path | Keep |
-| Qwen3.5 DFlash | Draft attention mask | Compared `none` vs `causal` | `none` is better | Keep |
-| Qwen3.5 DFlash | Imported hybrid hooks | Ported rollback hooks, split attention, context-only draft cache from `bstnxbt/dflash-mlx` | Helped, especially on long prefixes | Keep |
-| Qwen3.5 DFlash | Draft KV precompute | Precomputed context K/V and query-only draft attention | Correct, basically flat | Keep as cleanup |
-| Qwen3.5 DFlash | Fused all-layer draft K/V | Tried more aggressive fused draft projection | Worse | Drop |
-| Qwen3.5 DFlash | 9B target-side hook import | Imported 9B hybrid-target tricks | Short-prompt gain modest, long-prefix path better | Keep |
-| Qwen3.5 DTree | Initial correctness-first tree | Full-tree exact verifier over hybrid caches | Exact, very slow | Replaced |
-| Qwen3.5 DTree | Full-attention tree batching | Ran full-attention tree layers over whole tree block | Real win, but not enough alone | Keep in full-tree path |
-| Qwen3.5 DTree | Compiled recurrent breadth path | Compiled breadth-by-depth recurrent tree layer | Flat to worse | Drop |
-| Qwen3.5 DTree | Sequential exact tree | Walked real cache state branch-by-branch | Modest gain, memory-heavy | Drop |
-| Qwen3.5 DTree | Lazy exact verifier | Verified only the branch the target follows | First real 4B DTree win on broader speed slice | Keep default |
-| Qwen3.5 DTree | Full-tree fallback | `DTREE_QWEN35_TREE_MODE=full_tree` | Useful for comparison only | Keep fallback |
-| Qwen3.5 DTree | Small-tree q4 setting | `q4_g64 spec=16 tree_budget=2` | Won short Janet, lost broader sweep | Drop |
-| Qwen3.5 DTree | Lazy-budget sweep | Lazy path with `spec=16` and larger budgets | `tree_budget=24` best local point; bigger trees fell back | Keep `24` |
-| Qwen3.5 DTree | q4 correctness sanity | `N=12`, `q4_g64 spec=16 tree_budget=24` | Plain `11/12`, DFlash `12/12`, DTree lazy `11/12` | Speed win, not accuracy win |
-| Qwen3.5 DTree | Short greedy exactness | 24-token q4 greedy check vs DFlash | Token-for-token match | Keep confidence |
-| Qwen3.5 DTree | Tree verified-node accounting | Lazy path counts verified nodes on followed path | Verified nodes now track acceptance length instead of fixed `tree_budget + 1` | Keep |
-
-| Validation | Setting | Result | Decision |
-|---|---|---|---|
-| Qwen3 q4 sanity | `N=12`, `max_new_tokens=512` | bf16: plain `9/12`, DFlash `10/12`, DTree `11/12`; q4: plain `11/12`, DFlash `12/12`, DTree `11/12` | q4 stays opt-in |
-| Qwen3.5-4B speed | 8 gsm8k prompts, `q4_g64 spec=16 tree_budget=24` | DFlash `45.07` e2e TPS, DTree lazy `48.31` e2e TPS | First clean 4B DTree speed win |
-| Qwen3.5-4B correctness | `N=12`, `q4_g64 spec=16 tree_budget=24` | DFlash `12/12`, DTree lazy `11/12` | Needs larger validation |
+| Qwen3 q4 sanity | `N=12`, `max_new_tokens=512` | bf16: plain `9/12`, DFlash `10/12`, DTree `11/12`; q4: plain `11/12`, DFlash `12/12`, DTree `11/12` | Mixed | q4 stays opt-in |
+| Qwen3.5-4B speed | 8 gsm8k prompts, `q4_g64 spec=16 tree_budget=24` | DFlash `45.07` e2e TPS, DTree lazy `48.31` e2e TPS | 1.07x | First clean 4B DTree speed win |
+| Qwen3.5-4B correctness | `N=12`, `q4_g64 spec=16 tree_budget=24` | DFlash `12/12`, DTree lazy `11/12` | 0.92x | Needs larger validation |
 
 | Open lead | Why it still matters | Status |
 |---|---|---|
