@@ -25,6 +25,8 @@ from mlx_lm.models.qwen3_next import Qwen3NextMLP as MLP
 from mlx_lm.models.qwen3_next import Qwen3NextRMSNormGated as RMSNormGated
 from mlx_lm.models.qwen3_next import Qwen3NextSparseMoeBlock as SparseMoeBlock
 
+from dtree_mlx.qwen35_target import qwen35_full_attention_output
+
 
 def make_gated_delta_state_kernel():
     if not mx.metal.is_available():
@@ -180,14 +182,16 @@ def get_compiled_full_attention_verify_fn(layer):
         queries = attn.rope(queries, offset=offset)
         new_keys = attn.rope(new_keys, offset=offset)
 
-        keys = mx.concatenate([old_keys[..., :offset, :], new_keys], axis=2)
-        values = mx.concatenate([old_values[..., :offset, :], new_values], axis=2)
-        output = mx.fast.scaled_dot_product_attention(
-            queries,
-            keys,
-            values,
-            scale=attn.scale,
+        all_keys = mx.concatenate([old_keys[..., :offset, :], new_keys], axis=2)
+        all_values = mx.concatenate([old_values[..., :offset, :], new_values], axis=2)
+        output = qwen35_full_attention_output(
+            attn=attn,
+            queries=queries,
+            keys=all_keys,
+            values=all_values,
             mask="causal",
+            cache=None,
+            cached_prefix_len=offset,
         )
         output = output.transpose(0, 2, 1, 3).reshape(B, L, -1)
         output = attn.o_proj(output * mx.sigmoid(gate))
@@ -523,14 +527,16 @@ def forward_full_attention_layer_explicit(
     queries = attn.rope(queries, offset=offset)
     new_keys = attn.rope(new_keys, offset=offset)
 
-    keys = mx.concatenate([old_keys[..., :offset, :], new_keys], axis=2)
-    values = mx.concatenate([old_values[..., :offset, :], new_values], axis=2)
-    output = mx.fast.scaled_dot_product_attention(
-        queries,
-        keys,
-        values,
-        scale=attn.scale,
+    all_keys = mx.concatenate([old_keys[..., :offset, :], new_keys], axis=2)
+    all_values = mx.concatenate([old_values[..., :offset, :], new_values], axis=2)
+    output = qwen35_full_attention_output(
+        attn=attn,
+        queries=queries,
+        keys=all_keys,
+        values=all_values,
         mask="causal",
+        cache=None,
+        cached_prefix_len=offset,
     )
     output = output.transpose(0, 2, 1, 3).reshape(batch_size, seq_len, -1)
     output = attn.o_proj(output * mx.sigmoid(gate))
@@ -893,10 +899,10 @@ class Qwen3_5TextModel(nn.Module):
         if (
             ENABLE_EXPLICIT_CACHE_COMPILED_VERIFY
             and (
-            return_rollback_records
-            and input_embeddings is None
-            and inputs.shape[0] == 1
-            and inputs.shape[1] > 1
+                return_rollback_records
+                and input_embeddings is None
+                and inputs.shape[0] == 1
+                and inputs.shape[1] > 1
             )
         ):
             full_layer_indices = [idx for idx, layer in enumerate(self.layers) if not layer.is_linear]

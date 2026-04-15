@@ -157,71 +157,88 @@ class DFlashAttention(nn.Module):
             max_position_embeddings=args.max_position_embeddings,
         )
 
-    def __call__(
-        self,
-        hidden_states: mx.array,
-        target_hidden: mx.array,
-        cache: cache_lib.KVCache | ContextOnlyDraftKVCache | None = None,
-    ) -> mx.array:
+    def _project_queries(self, hidden_states: mx.array) -> mx.array:
         batch_size, query_len, _ = hidden_states.shape
-        context_len = int(target_hidden.shape[1])
-
         queries = self.q_proj(hidden_states)
-        queries = self.q_norm(
+        return self.q_norm(
             queries.reshape(batch_size, query_len, self.n_heads, self.head_dim)
         ).transpose(0, 2, 1, 3)
 
-        context_keys = self.k_proj(target_hidden)
-        context_keys = self.k_norm(
-            context_keys.reshape(
-                batch_size,
-                context_len,
-                self.n_kv_heads,
-                self.head_dim,
-            )
+    def _project_keys_values(self, hidden_states: mx.array) -> tuple[mx.array, mx.array]:
+        batch_size, seq_len, _ = hidden_states.shape
+        keys = self.k_proj(hidden_states)
+        keys = self.k_norm(
+            keys.reshape(batch_size, seq_len, self.n_kv_heads, self.head_dim)
         ).transpose(0, 2, 1, 3)
-        context_values = self.v_proj(target_hidden).reshape(
+        values = self.v_proj(hidden_states).reshape(
             batch_size,
-            context_len,
+            seq_len,
             self.n_kv_heads,
             self.head_dim,
         ).transpose(0, 2, 1, 3)
-        noise_keys = self.k_proj(hidden_states)
-        noise_keys = self.k_norm(
-            noise_keys.reshape(
-                batch_size,
-                query_len,
-                self.n_kv_heads,
-                self.head_dim,
-            )
-        ).transpose(0, 2, 1, 3)
-        noise_values = self.v_proj(hidden_states).reshape(
-            batch_size,
-            query_len,
-            self.n_kv_heads,
-            self.head_dim,
-        ).transpose(0, 2, 1, 3)
+        return keys, values
+
+    def precompute_context_kv(
+        self,
+        target_hidden: mx.array,
+        cache: cache_lib.KVCache | ContextOnlyDraftKVCache | None,
+    ) -> None:
+        if cache is None:
+            return
+        context_len = int(target_hidden.shape[1])
+        if context_len <= 0:
+            return
+        context_keys, context_values = self._project_keys_values(target_hidden)
+        context_keys = self.rope(context_keys, offset=int(cache.offset))
+        if isinstance(cache, ContextOnlyDraftKVCache):
+            cache.append_context(context_keys, context_values, context_len)
+        else:
+            cache.update_and_fetch(context_keys, context_values)
+
+    def __call__(
+        self,
+        hidden_states: mx.array,
+        target_hidden: mx.array | None = None,
+        cache: cache_lib.KVCache | ContextOnlyDraftKVCache | None = None,
+    ) -> mx.array:
+        batch_size, query_len, _ = hidden_states.shape
+        if cache is not None and target_hidden is not None:
+            self.precompute_context_kv(target_hidden, cache)
+            target_hidden = None
+
+        queries = self._project_queries(hidden_states)
+        noise_keys, noise_values = self._project_keys_values(hidden_states)
 
         if cache is not None:
+            cache_offset = int(cache.offset)
             if isinstance(cache, ContextOnlyDraftKVCache):
-                cache_offset = int(cache.offset)
-                query_offset = cache_offset + context_len
-                queries = self.rope(queries, offset=query_offset)
-                context_keys = self.rope(context_keys, offset=cache_offset)
-                noise_keys = self.rope(noise_keys, offset=query_offset)
-
-                cache.append_context(context_keys, context_values, context_len)
+                queries = self.rope(queries, offset=cache_offset)
+                noise_keys = self.rope(noise_keys, offset=cache_offset)
                 cached_keys, cached_values = cache.fetch()
+                if cached_keys is None or cached_values is None:
+                    raise ValueError("Context-only draft cache is missing precomputed context.")
+                if hasattr(mx.fast, "dflash_cross_attention"):
+                    output = mx.fast.dflash_cross_attention(
+                        queries,
+                        cached_keys,
+                        cached_values,
+                        noise_keys,
+                        noise_values,
+                        scale=self.scale,
+                    )
+                    output = output.transpose(0, 2, 1, 3).reshape(batch_size, query_len, -1)
+                    return self.o_proj(output)
                 keys = mx.concatenate([cached_keys, noise_keys], axis=-2)
                 values = mx.concatenate([cached_values, noise_values], axis=-2)
             else:
-                queries = self.rope(queries, offset=cache.offset + context_len)
-                context_keys = self.rope(context_keys, offset=cache.offset)
-                noise_keys = self.rope(noise_keys, offset=cache.offset + context_len)
-                keys = mx.concatenate([context_keys, noise_keys], axis=-2)
-                values = mx.concatenate([context_values, noise_values], axis=-2)
-                keys, values = cache.update_and_fetch(keys, values)
+                queries = self.rope(queries, offset=cache_offset)
+                noise_keys = self.rope(noise_keys, offset=cache_offset)
+                keys, values = cache.update_and_fetch(noise_keys, noise_values)
         else:
+            if target_hidden is None:
+                raise ValueError("Draft attention requires target_hidden when cache is disabled.")
+            context_len = int(target_hidden.shape[1])
+            context_keys, context_values = self._project_keys_values(target_hidden)
             queries = self.rope(queries, offset=context_len)
             context_keys = self.rope(context_keys, offset=0)
             noise_keys = self.rope(noise_keys, offset=context_len)
@@ -268,7 +285,7 @@ class DFlashDecoderLayer(nn.Module):
     def __call__(
         self,
         hidden_states: mx.array,
-        target_hidden: mx.array,
+        target_hidden: mx.array | None = None,
         cache: cache_lib.KVCache | ContextOnlyDraftKVCache | None = None,
     ) -> mx.array:
         residual = hidden_states
@@ -315,19 +332,38 @@ class DFlashDraftModel(nn.Module):
             return [ContextOnlyDraftKVCache() for _ in self.layers]
         return [cache_lib.KVCache() for _ in self.layers]
 
+    def prepare_target_hidden(self, target_hidden: mx.array) -> mx.array:
+        return self.hidden_norm(self.fc(target_hidden))
+
+    def precompute_context_kv(
+        self,
+        target_hidden: mx.array,
+        cache: list[cache_lib.KVCache | ContextOnlyDraftKVCache] | None,
+    ) -> None:
+        if cache is None:
+            return
+
+        for layer, layer_cache in zip(self.layers, cache):
+            if layer_cache is None:
+                continue
+            layer.self_attn.precompute_context_kv(target_hidden, layer_cache)
+
     def __call__(
         self,
         noise_embedding: mx.array,
         target_hidden: mx.array,
-        cache: list[cache_lib.KVCache] | None = None,
+        cache: list[cache_lib.KVCache | ContextOnlyDraftKVCache] | None = None,
     ) -> mx.array:
         hidden_states = noise_embedding
-        target_hidden = self.hidden_norm(self.fc(target_hidden))
+        target_hidden = self.prepare_target_hidden(target_hidden)
         if cache is None:
             cache = [None] * len(self.layers)
+        else:
+            self.precompute_context_kv(target_hidden, cache)
         for layer, layer_cache in zip(self.layers, cache):
             layer.self_attn.mask_mode = self.attention_mask_mode
-            hidden_states = layer(hidden_states, target_hidden, cache=layer_cache)
+            layer_target_hidden = None if layer_cache is not None else target_hidden
+            hidden_states = layer(hidden_states, layer_target_hidden, cache=layer_cache)
         return self.norm(hidden_states)
 
 

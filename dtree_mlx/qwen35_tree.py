@@ -4,12 +4,12 @@ from dataclasses import dataclass
 from typing import Any
 
 import mlx.core as mx
-from mlx_lm.models.base import scaled_dot_product_attention
 
 from .custom_qwen35_model import (
     get_compiled_full_attention_verify_fn,
     get_compiled_linear_verify_fn,
 )
+from .qwen35_target import qwen35_full_attention_output
 
 
 @dataclass
@@ -137,13 +137,14 @@ def forward_full_attention_tree_token(
         if prefix_value_chunks
         else new_values
     )
-    output = scaled_dot_product_attention(
-        queries,
-        all_keys,
-        all_values,
-        cache=None,
-        scale=attn.scale,
+    output = qwen35_full_attention_output(
+        attn=attn,
+        queries=queries,
+        keys=all_keys,
+        values=all_values,
         mask=None,
+        cache=None,
+        cached_prefix_len=prefix_len,
     )
     output = output.transpose(0, 2, 1, 3).reshape(batch_size, seq_len, -1)
     output = attn.o_proj(output * mx.sigmoid(gate))

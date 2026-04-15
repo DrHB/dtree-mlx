@@ -421,8 +421,76 @@ def _split_sdpa_output(
                 scale=scale,
                 mask=chunk_mask,
             )
-        )
+    )
     return mx.concatenate(outputs, axis=2)
+
+
+def qwen35_full_attention_output(
+    *,
+    attn: Any,
+    queries: mx.array,
+    keys: mx.array,
+    values: mx.array,
+    mask: Optional[Any],
+    cache: Optional[Any],
+    cached_prefix_len: int,
+) -> mx.array:
+    exact_prefix_threshold = int(
+        getattr(
+            attn,
+            "_dflash_split_sdpa_exact_kv_threshold",
+            1024,
+        )
+    )
+    chunk_size = int(getattr(attn, "_dflash_split_sdpa_chunk_size", 8))
+    should_split = (
+        cached_prefix_len >= exact_prefix_threshold
+        and (mask is None or mask == "causal" or isinstance(mask, mx.array))
+    )
+    should_use_batched_2pass = (
+        should_split
+        and int(queries.shape[2]) == 16
+        and queries.dtype in (mx.bfloat16, mx.float16)
+        and int(queries.shape[-1]) in (128, 256)
+        and int(values.shape[-1]) in (128, 256)
+    )
+    if should_use_batched_2pass:
+        output = batched_sdpa_2pass_exact(
+            queries=queries,
+            keys=keys,
+            values=values,
+            scale=attn.scale,
+            mask=mask if isinstance(mask, mx.array) else None,
+        )
+        if output is not None:
+            return output
+    if should_split:
+        return _split_sdpa_output(
+            queries=queries,
+            keys=keys,
+            values=values,
+            scale=attn.scale,
+            mask=mask,
+            cache=cache,
+            chunk_size=chunk_size,
+            cached_prefix_len=cached_prefix_len,
+        )
+    if cache is None and (mask is None or mask == "causal"):
+        return mx.fast.scaled_dot_product_attention(
+            queries,
+            keys,
+            values,
+            scale=attn.scale,
+            mask=mask,
+        )
+    return scaled_dot_product_attention(
+        queries,
+        keys,
+        values,
+        cache=cache,
+        scale=attn.scale,
+        mask=mask,
+    )
 
 
 def _install_split_full_attention_hook(attn: Any) -> None:
@@ -479,67 +547,15 @@ def _install_split_full_attention_hook(attn: Any) -> None:
         else:
             queries = self.rope(queries)
             keys = self.rope(keys)
-
-        total_kv_len = int(keys.shape[2])
-        exact_prefix_threshold = int(
-            getattr(
-                self,
-                "_dflash_split_sdpa_exact_kv_threshold",
-                1024,
-            )
+        output = qwen35_full_attention_output(
+            attn=self,
+            queries=queries,
+            keys=keys,
+            values=values,
+            mask=mask,
+            cache=cache,
+            cached_prefix_len=cached_prefix_len,
         )
-        chunk_size = int(getattr(self, "_dflash_split_sdpa_chunk_size", 8))
-        should_split = (
-            cache is not None
-            and cached_prefix_len >= exact_prefix_threshold
-            and (mask is None or mask == "causal" or isinstance(mask, mx.array))
-        )
-        should_use_batched_2pass = (
-            should_split
-            and int(queries.shape[2]) == 16
-            and queries.dtype in (mx.bfloat16, mx.float16)
-            and int(queries.shape[-1]) in (128, 256)
-            and int(values.shape[-1]) in (128, 256)
-        )
-        if should_use_batched_2pass:
-            output = batched_sdpa_2pass_exact(
-                queries=queries,
-                keys=keys,
-                values=values,
-                scale=self.scale,
-                mask=mask if isinstance(mask, mx.array) else None,
-            )
-            if output is None:
-                output = _split_sdpa_output(
-                    queries=queries,
-                    keys=keys,
-                    values=values,
-                    scale=self.scale,
-                    mask=mask,
-                    cache=cache,
-                    chunk_size=chunk_size,
-                    cached_prefix_len=cached_prefix_len,
-                )
-        elif should_split:
-            output = _split_sdpa_output(
-                queries=queries,
-                keys=keys,
-                values=values,
-                scale=self.scale,
-                mask=mask,
-                cache=cache,
-                chunk_size=chunk_size,
-                cached_prefix_len=cached_prefix_len,
-            )
-        else:
-            output = scaled_dot_product_attention(
-                queries,
-                keys,
-                values,
-                cache=cache,
-                scale=self.scale,
-                mask=mask,
-            )
         output = output.transpose(0, 2, 1, 3).reshape(batch_size, seq_len, -1)
         gated_output = output * mx.sigmoid(gate)
         return self.o_proj(gated_output)
