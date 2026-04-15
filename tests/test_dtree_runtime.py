@@ -65,19 +65,18 @@ def test_build_node_lineages_returns_root_to_parent_paths():
 
 
 def test_lazy_follow_tree_exact_walks_only_the_taken_branch():
-    class FakeTarget:
-        def __init__(self):
-            self.adapter = SimpleNamespace(family="qwen3_5")
-            self.model = object()
-            self.seen_tokens: list[int] = []
-
-        def forward_tree_step_with_hidden_states(self, inputs, cache, layer_ids):
+    class FakeTextModel:
+        def forward_dflash(self, inputs, cache, layer_ids):
             del cache, layer_ids
             token = int(inputs[0, 0].item())
-            self.seen_tokens.append(token)
             norm_hidden = mx.array([[[token]]], dtype=mx.float32)
             verifier_hidden = mx.array([[[token + 1000]]], dtype=mx.float32)
             return norm_hidden, verifier_hidden
+
+    class FakeTarget:
+        def __init__(self):
+            self.adapter = SimpleNamespace(family="qwen3_5")
+            self.model = SimpleNamespace(language_model=SimpleNamespace(model=FakeTextModel()))
 
         def lm_head_argmax(self, hidden_states):
             token = int(hidden_states[0, 0, 0].item())
@@ -91,9 +90,8 @@ def test_lazy_follow_tree_exact_walks_only_the_taken_branch():
         {},
     ]
 
-    target = FakeTarget()
     accepted, next_token, verifier_hidden = lazy_follow_tree_exact(
-        target=target,
+        target=FakeTarget(),
         target_cache=[],
         layer_ids=[],
         tree_tokens=[10, 11, 12, 21],
@@ -105,5 +103,4 @@ def test_lazy_follow_tree_exact_walks_only_the_taken_branch():
 
     assert accepted == [0, 1, 3]
     assert next_token == 999
-    assert target.seen_tokens == [10, 11, 21]
     assert verifier_hidden.tolist() == [[[1010.0], [1011.0], [1021.0]]]

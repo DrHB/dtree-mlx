@@ -91,7 +91,6 @@ def make_gated_delta_state_kernel():
 GATED_DELTA_STATE_KERNEL = make_gated_delta_state_kernel()
 FULL_ATTENTION_VERIFY_COMPILED_FNS: dict[int, Any] = {}
 LINEAR_VERIFY_COMPILED_FNS: dict[int, Any] = {}
-VERIFY_COMPILED_FNS: dict[tuple[int, tuple[int, ...], int], Any] = {}
 VERIFY_WITH_ROLLBACK_COMPILED_FNS: dict[tuple[int, tuple[int, ...], int], Any] = {}
 ENABLE_EXPLICIT_CACHE_COMPILED_VERIFY = False
 ENABLE_LINEAR_LAYER_COMPILED_VERIFY = True
@@ -643,78 +642,6 @@ def get_compiled_verify_with_rollback_fn(
     return compiled_verify
 
 
-def get_compiled_verify_fn(
-    text_model,
-    layer_ids: tuple[int, ...],
-    seq_len: int,
-):
-    key = (id(text_model), layer_ids, seq_len)
-    compiled = VERIFY_COMPILED_FNS.get(key)
-    if compiled is not None:
-        return compiled
-
-    target_layer_ids = set(layer_ids)
-
-    @mx.compile
-    def compiled_verify(
-        inputs: mx.array,
-        fa_offset: int,
-        full_keys: list[mx.array],
-        full_values: list[mx.array],
-        linear_conv_states: list[mx.array],
-        linear_states: list[mx.array],
-    ):
-        hidden_states = text_model.embed_tokens(inputs)
-        selected_hidden_states: list[mx.array] = []
-        new_full_keys: list[mx.array] = []
-        new_full_values: list[mx.array] = []
-        new_linear_conv_states: list[mx.array] = []
-        new_linear_states: list[mx.array] = []
-
-        full_idx = 0
-        linear_idx = 0
-        for layer_idx, layer in enumerate(text_model.layers):
-            if layer.is_linear:
-                hidden_states, new_conv_state, new_state, _, _, _, _, _ = (
-                    forward_linear_layer_explicit_with_record(
-                        layer,
-                        hidden_states,
-                        None,
-                        linear_conv_states[linear_idx],
-                        linear_states[linear_idx],
-                    )
-                )
-                new_linear_conv_states.append(new_conv_state)
-                new_linear_states.append(new_state)
-                linear_idx += 1
-            else:
-                hidden_states, new_keys, new_values = forward_full_attention_layer_explicit(
-                    layer,
-                    hidden_states,
-                    full_keys[full_idx],
-                    full_values[full_idx],
-                    fa_offset,
-                )
-                new_full_keys.append(new_keys)
-                new_full_values.append(new_values)
-                full_idx += 1
-
-            if layer_idx in target_layer_ids:
-                selected_hidden_states.append(hidden_states)
-
-        return (
-            text_model.norm(hidden_states),
-            mx.concatenate(selected_hidden_states, axis=-1),
-            new_full_keys,
-            new_full_values,
-            new_linear_conv_states,
-            new_linear_states,
-        )
-
-    VERIFY_COMPILED_FNS[key] = compiled_verify
-    return compiled_verify
-
-
 @dataclass
 class TextModelArgs(BaseModelArgs):
     model_type: str = ""
@@ -1086,73 +1013,6 @@ class Qwen3_5TextModel(nn.Module):
             return norm_hidden_states, target_hidden, rollback_records
         return norm_hidden_states, target_hidden
 
-    def forward_tree_step(
-        self,
-        inputs: mx.array,
-        cache: list[Any],
-        layer_ids: list[int],
-    ) -> tuple[mx.array, mx.array]:
-        full_layer_indices = [idx for idx, layer in enumerate(self.layers) if not layer.is_linear]
-        linear_layer_indices = [idx for idx, layer in enumerate(self.layers) if layer.is_linear]
-
-        if (
-            inputs.shape[0] == 1
-            and inputs.shape[1] == 1
-            and all(
-                cache[idx].keys is not None and cache[idx].values is not None
-                for idx in full_layer_indices
-            )
-            and all(
-                cache[idx][0] is not None and cache[idx][1] is not None
-                for idx in linear_layer_indices
-            )
-        ):
-            compiled = get_compiled_verify_fn(
-                self,
-                tuple(layer_ids),
-                int(inputs.shape[1]),
-            )
-            full_keys = [cache[idx].keys for idx in full_layer_indices]
-            full_values = [cache[idx].values for idx in full_layer_indices]
-            linear_conv_states = [cache[idx][0] for idx in linear_layer_indices]
-            linear_states = [cache[idx][1] for idx in linear_layer_indices]
-            (
-                norm_hidden_states,
-                target_hidden,
-                new_full_keys,
-                new_full_values,
-                new_linear_conv_states,
-                new_linear_states,
-            ) = compiled(
-                inputs,
-                cache[self.fa_idx].offset,
-                full_keys,
-                full_values,
-                linear_conv_states,
-                linear_states,
-            )
-            for idx, new_keys, new_values in zip(
-                full_layer_indices,
-                new_full_keys,
-                new_full_values,
-            ):
-                cache[idx].update_and_fetch(new_keys, new_values)
-            for idx, new_conv_state, new_state in zip(
-                linear_layer_indices,
-                new_linear_conv_states,
-                new_linear_states,
-            ):
-                cache[idx][0] = new_conv_state
-                cache[idx][1] = new_state
-            return norm_hidden_states, target_hidden
-
-        return self.forward_dflash(
-            inputs=inputs,
-            cache=cache,
-            layer_ids=layer_ids,
-            return_rollback_records=False,
-        )
-
     def snapshot_linear_caches(
         self,
         cache: list[Any],
@@ -1277,18 +1137,6 @@ class TextModel(nn.Module):
             return logits, target_hidden, rollback_records
         return logits, target_hidden
 
-    def forward_tree_step(
-        self,
-        inputs: mx.array,
-        cache: list[Any],
-        layer_ids: list[int],
-    ) -> tuple[mx.array, mx.array]:
-        return self.model.forward_tree_step(
-            inputs=inputs,
-            cache=cache,
-            layer_ids=layer_ids,
-        )
-
     def snapshot_linear_caches(
         self,
         cache: list[Any],
@@ -1408,18 +1256,6 @@ class Model(nn.Module):
             layer_ids=layer_ids,
             input_embeddings=input_embeddings,
             return_rollback_records=return_rollback_records,
-        )
-
-    def forward_tree_step(
-        self,
-        inputs: mx.array,
-        cache: list[Any],
-        layer_ids: list[int],
-    ) -> tuple[mx.array, mx.array]:
-        return self.language_model.forward_tree_step(
-            inputs=inputs,
-            cache=cache,
-            layer_ids=layer_ids,
         )
 
     def snapshot_linear_caches(

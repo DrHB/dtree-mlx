@@ -221,6 +221,14 @@ def lazy_follow_tree_exact(
     if target.adapter.family != "qwen3_5":
         raise NotImplementedError("lazy_follow_tree_exact is only implemented for qwen3_5.")
 
+    target_model = target.model
+    if hasattr(target_model, "language_model") and hasattr(target_model.language_model, "model"):
+        text_model = target_model.language_model.model
+    elif hasattr(target_model, "model"):
+        text_model = target_model.model
+    else:
+        raise AttributeError(f"Unsupported qwen3_5 target model: {type(target_model)!r}")
+
     accepted_indices: list[int] = []
     hidden_chunks: list[mx.array] = []
     current_index = 0
@@ -228,10 +236,10 @@ def lazy_follow_tree_exact(
     while True:
         verify_forward_start = profile_start(profile_times)
         input_ids = mx.array([[tree_tokens[current_index]]], dtype=mx.uint32)
-        norm_hidden_states, verifier_hidden = target.forward_tree_step_with_hidden_states(
-            inputs=input_ids,
-            cache=target_cache,
-            layer_ids=layer_ids,
+        norm_hidden_states, verifier_hidden = text_model.forward_dflash(
+            input_ids,
+            target_cache,
+            layer_ids,
         )
         if profile_times is not None:
             mx.eval(norm_hidden_states, verifier_hidden)

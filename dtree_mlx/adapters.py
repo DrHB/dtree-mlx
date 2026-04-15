@@ -77,22 +77,6 @@ class MLXTargetAdapter:
             f"{self.family} does not expose verifier states before the LM head."
         )
 
-    def forward_tree_step_with_hidden_states(
-        self,
-        model,
-        inputs: mx.array,
-        cache: list[Any],
-        layer_ids: list[int],
-    ) -> tuple[mx.array, mx.array]:
-        logits, target_hidden = self.forward_with_hidden_states(
-            model,
-            inputs,
-            cache,
-            layer_ids,
-            return_rollback_records=False,
-        )
-        return logits, target_hidden
-
     def forward_accept_all_block(
         self,
         model,
@@ -267,29 +251,6 @@ class Qwen35TargetAdapter(MLXTargetAdapter):
             )
         raise NotImplementedError(
             "Qwen3.5 lazy-logit verification requires the custom MLX model fork."
-        )
-
-    def forward_tree_step_with_hidden_states(
-        self,
-        model,
-        inputs: mx.array,
-        cache: list[Any],
-        layer_ids: list[int],
-    ) -> tuple[mx.array, mx.array]:
-        if hasattr(model, "language_model") and hasattr(
-            model.language_model.model,
-            "forward_tree_step",
-        ):
-            return model.language_model.model.forward_tree_step(
-                inputs=inputs,
-                cache=cache,
-                layer_ids=layer_ids,
-            )
-        return super().forward_tree_step_with_hidden_states(
-            model,
-            inputs,
-            cache,
-            layer_ids,
         )
 
     def forward_accept_all_block(
@@ -697,19 +658,6 @@ class LoadedTargetModel:
         layer_ids: list[int],
     ) -> tuple[mx.array, mx.array, dict[int, dict[str, mx.array]]]:
         return self.adapter.forward_verifier_states(
-            self.model,
-            inputs,
-            cache,
-            layer_ids,
-        )
-
-    def forward_tree_step_with_hidden_states(
-        self,
-        inputs: mx.array,
-        cache: list[Any],
-        layer_ids: list[int],
-    ) -> tuple[mx.array, mx.array]:
-        return self.adapter.forward_tree_step_with_hidden_states(
             self.model,
             inputs,
             cache,
