@@ -49,10 +49,12 @@ Notes:
 
 - The better default for `qwen3_5` is `--draft-attention-mask none`.
 - The current `qwen3_5` path uses two imported ideas from `bstnxbt/dflash-mlx`: target-side hybrid rollback hooks and a context-only draft cache.
+- The current `qwen3_5` DTree path also reuses the compiled per-layer Qwen3.5 verifier kernels already used by DFlash.
 - The 4B pair speeds up cleanly on this prompt. The 9B pair only gives a small local win on short prompts and still trails the best public MLX Qwen3.5 DFlash numbers.
 - On longer prompts, the imported hybrid-target path matters more. See [OPTIMIZATION_README.md](OPTIMIZATION_README.md).
-- `qwen3_5` now also has an experimental `dtree` path. It matches DFlash token output on a short greedy 4B check, but the current implementation is correctness-first and not optimized.
-- On a short Janet check with `--speculative-tokens 8 --tree-budget 8`, Qwen3.5-4B DTree reached `12.85` end-to-end TPS versus `21.54` for DFlash.
+- `qwen3_5` now also has an experimental `dtree` path. On a short greedy 4B check it matches DFlash token output.
+- In bf16, local Qwen3.5-4B DTree still trails DFlash on short prompts.
+- The first local Qwen3.5-4B crossover is with `--target-quant-bits 4 --target-quant-group-size 64 --speculative-tokens 16 --tree-budget 2`: `34.90` e2e TPS for DTree versus `33.12` for DFlash on the short Janet check.
 
 ## Reproduce
 

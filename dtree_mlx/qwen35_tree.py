@@ -6,7 +6,10 @@ from typing import Any
 import mlx.core as mx
 from mlx_lm.models.base import scaled_dot_product_attention
 
-from .custom_qwen35_model import forward_linear_layer_explicit_with_record
+from .custom_qwen35_model import (
+    get_compiled_full_attention_verify_fn,
+    get_compiled_linear_verify_fn,
+)
 
 
 @dataclass
@@ -87,6 +90,18 @@ def forward_full_attention_tree_token(
     position_id: int,
 ) -> tuple[mx.array, mx.array, mx.array]:
     attn = layer.self_attn
+    old_keys = mx.concatenate(prefix_key_chunks, axis=2) if prefix_key_chunks else None
+    old_values = mx.concatenate(prefix_value_chunks, axis=2) if prefix_value_chunks else None
+    prefix_len = 0 if old_keys is None else int(old_keys.shape[2])
+    if old_keys is not None and old_values is not None:
+        compiled = get_compiled_full_attention_verify_fn(layer)
+        return compiled(
+            hidden_states,
+            old_keys,
+            old_values,
+            prefix_len,
+        )
+
     residual = hidden_states
     inputs = layer.input_layernorm(hidden_states)
     batch_size, seq_len, _ = inputs.shape
@@ -220,10 +235,8 @@ def forward_qwen35_tree_with_hidden_states(
                     _values,
                     _g,
                     _beta,
-                ) = forward_linear_layer_explicit_with_record(
-                    layer,
+                ) = get_compiled_linear_verify_fn(layer)(
                     hidden_states,
-                    None,
                     initial_conv_state,
                     initial_state,
                 )

@@ -139,6 +139,7 @@ Takeaways:
 Experimental DTree status:
 
 - The repo now has a correctness-first `qwen3_5` DTree path that keeps the real caches untouched during tree verify and commits only the accepted path.
+- The tree path now reuses the compiled per-layer Qwen3.5 verifier kernels from the DFlash path. That helps a little, but it does not change the overall economics by itself.
 - On a short greedy Qwen3.5-4B check (`24` generated tokens), DTree matched DFlash token-for-token.
 
 Short Janet checks with `temperature=0` and `--speculative-tokens 8 --tree-budget 8`:
@@ -154,3 +155,11 @@ Conclusion:
 
 - `qwen3_5` DTree is functional and exact on the short 4B check.
 - It is not optimized yet, especially on 4B.
+
+Useful local setting found later:
+
+- For Qwen3.5-4B on the short Janet check, bf16 DTree still trails DFlash even after the compiled-kernel reuse.
+- But `q4_g64` changes that:
+  - DFlash, `--speculative-tokens 16`: `36.55` gen TPS, `33.12` e2e TPS, accept `4.25`
+  - DTree, `--speculative-tokens 16 --tree-budget 2`: `38.76` gen TPS, `34.90` e2e TPS, accept `2.36`
+- On that same quantized target, DTree still matched DFlash token-for-token on a short greedy 4B check.
