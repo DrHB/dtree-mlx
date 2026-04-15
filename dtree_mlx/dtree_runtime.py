@@ -82,6 +82,7 @@ def cache_compaction_eval_tensors(
 def build_dtree_tree(
     draft_logits: mx.array,
     budget: int,
+    candidate_topk: int | None = None,
 ) -> tuple[list[int], list[int], list[int], list[dict[int, int]], mx.array, dict[str, float]]:
     subtimes = {name: 0.0 for name in DTREE_TREE_BUILD_STAGE_ORDER}
 
@@ -89,7 +90,8 @@ def build_dtree_tree(
         visibility = mx.array([[True]], dtype=mx.bool_)
         return [], [], [-1], [dict()], visibility, subtimes
 
-    topk = min(budget, int(draft_logits.shape[-1]))
+    requested_topk = budget if candidate_topk is None else max(budget, int(candidate_topk))
+    topk = min(requested_topk, int(draft_logits.shape[-1]))
     depth_limit = int(draft_logits.shape[0])
 
     copy_start = time.perf_counter()
@@ -353,6 +355,12 @@ def dtree_generate(
     acceptance_lengths: list[int] = []
     verified_tree_nodes: list[int] = []
     qwen35_tree_mode = os.environ.get("DTREE_QWEN35_TREE_MODE")
+    tree_candidate_topk = os.environ.get("DTREE_TREE_CANDIDATE_TOPK")
+    candidate_topk = (
+        int(tree_candidate_topk)
+        if tree_candidate_topk is not None and tree_candidate_topk.strip()
+        else None
+    )
     # Qwen3.5 hybrid caches are expensive to materialize for every speculative
     # branch. The default tree path verifies only the branch the target follows.
     use_lazy_qwen35_tree = (
@@ -378,14 +386,31 @@ def dtree_generate(
         add_profile_elapsed(profile_times, "draft_time_s", draft_start)
 
         tree_build_start = profile_start(profile_times)
-        (
-            node_token_ids,
-            node_depths,
-            parents,
-            child_maps,
-            visibility,
-            tree_build_subtimes,
-        ) = build_dtree_tree(draft_logits[0], effective_tree_budget)
+        if candidate_topk is not None:
+            (
+                node_token_ids,
+                node_depths,
+                parents,
+                child_maps,
+                visibility,
+                tree_build_subtimes,
+            ) = build_dtree_tree(
+                draft_logits[0],
+                effective_tree_budget,
+                candidate_topk=candidate_topk,
+            )
+        else:
+            (
+                node_token_ids,
+                node_depths,
+                parents,
+                child_maps,
+                visibility,
+                tree_build_subtimes,
+            ) = build_dtree_tree(
+                draft_logits[0],
+                effective_tree_budget,
+            )
         add_profile_elapsed(profile_times, "tree_build_time_s", tree_build_start)
         if profile_times is not None:
             for key, value in tree_build_subtimes.items():
@@ -574,6 +599,7 @@ def dtree_generate(
         "target_cache_summary": target.cache_summary(target_cache),
         "speculative_tokens": block_size,
         "tree_budget": effective_tree_budget,
+        "tree_candidate_topk": candidate_topk if candidate_topk is not None else effective_tree_budget,
         "verify_mode": verify_mode,
     }
     if profile_times is not None:

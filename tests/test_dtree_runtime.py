@@ -40,6 +40,28 @@ def test_build_dtree_tree_returns_prefix_closed_visibility():
         assert bool(visibility[node_index, node_index].item()) is True
 
 
+def test_build_dtree_tree_supports_wider_candidate_pool_than_budget():
+    draft_logits = mx.array(
+        [
+            [8.0, 7.0, 6.0, 5.0],
+            [8.0, 7.0, 6.0, 5.0],
+        ],
+        dtype=mx.float32,
+    )
+
+    node_token_ids, node_depths, parents, child_maps, visibility, _ = build_dtree_tree(
+        draft_logits=draft_logits,
+        budget=2,
+        candidate_topk=4,
+    )
+
+    assert len(node_token_ids) == 2
+    assert len(node_depths) == 2
+    assert parents[0] == -1
+    assert visibility.shape == (3, 3)
+    assert child_maps[0]
+
+
 def test_follow_verified_tree_walks_matching_children():
     child_maps = [
         {11: 1, 12: 2},
