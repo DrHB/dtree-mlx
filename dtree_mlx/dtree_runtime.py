@@ -56,17 +56,6 @@ def empty_dtree_profile() -> dict[str, float]:
     }
 
 
-def current_rank_score_bias(
-    rank_accept_success: list[float],
-    rank_accept_failure: list[float],
-) -> np.ndarray:
-    success = np.asarray(rank_accept_success, dtype=np.float32)
-    failure = np.asarray(rank_accept_failure, dtype=np.float32)
-    probs = success / np.maximum(success + failure, 1e-6)
-    base = max(float(probs[0]), 1e-6)
-    return np.log(np.maximum(probs, 1e-6) / base).astype(np.float32)
-
-
 def cache_compaction_eval_tensors(
     cache: list[Any],
     past_length: int,
@@ -93,13 +82,12 @@ def cache_compaction_eval_tensors(
 def build_dtree_tree(
     draft_logits: mx.array,
     budget: int,
-    rank_score_bias: np.ndarray | None = None,
-) -> tuple[list[int], list[int], list[int], list[int], list[dict[int, int]], mx.array, dict[str, float]]:
+) -> tuple[list[int], list[int], list[int], list[dict[int, int]], mx.array, dict[str, float]]:
     subtimes = {name: 0.0 for name in DTREE_TREE_BUILD_STAGE_ORDER}
 
     if budget <= 0 or draft_logits.shape[0] == 0:
         visibility = mx.array([[True]], dtype=mx.bool_)
-        return [], [], [], [-1], [dict()], visibility, subtimes
+        return [], [], [-1], [dict()], visibility, subtimes
 
     topk = min(budget, int(draft_logits.shape[-1]))
     depth_limit = int(draft_logits.shape[0])
@@ -119,35 +107,24 @@ def build_dtree_tree(
     top_log_probs_np = np.array(top_log_probs, dtype=np.float32)
     subtimes["tree_build_copy_time_s"] = time.perf_counter() - copy_start
 
-    if rank_score_bias is None:
-        rank_score_bias = np.zeros(topk, dtype=np.float32)
-    else:
-        rank_score_bias = np.asarray(rank_score_bias[:topk], dtype=np.float32)
-
-    def token_score(depth_index: int, rank: int) -> float:
-        return float(top_log_probs_np[depth_index, rank] + rank_score_bias[rank])
-
     heap_start = time.perf_counter()
     first_logw = float(top_log_probs_np[0, 0])
-    first_score = token_score(0, 0)
-    heap: list[tuple[float, tuple[int, ...], int, int, int, float, float]] = [
-        (-first_score, (0,), 0, 1, 0, first_logw, first_score)
+    heap: list[tuple[float, tuple[int, ...], int, int, int, float]] = [
+        (-first_logw, (0,), 0, 1, 0, first_logw)
     ]
 
     node_token_ids: list[int] = []
     node_depths: list[int] = []
-    node_ranks: list[int] = []
     parents = [-1]
     child_maps: list[dict[int, int]] = [dict()]
 
     while heap and len(node_token_ids) < budget:
-        _, ranks, parent_index, depth, rank, logw, scorew = heapq.heappop(heap)
+        _, ranks, parent_index, depth, rank, logw = heapq.heappop(heap)
 
         token_id = int(top_token_ids_np[depth - 1, rank])
         current_index = len(node_token_ids) + 1
         node_token_ids.append(token_id)
         node_depths.append(depth)
-        node_ranks.append(rank)
         parents.append(parent_index)
         child_maps.append(dict())
         child_maps[parent_index][token_id] = current_index
@@ -157,38 +134,17 @@ def build_dtree_tree(
             sibling_logw = logw - float(top_log_probs_np[depth - 1, rank]) + float(
                 top_log_probs_np[depth - 1, rank + 1]
             )
-            sibling_score = scorew - token_score(depth - 1, rank) + token_score(
-                depth - 1,
-                rank + 1,
-            )
             heapq.heappush(
                 heap,
-                (
-                    -sibling_score,
-                    sibling_ranks,
-                    parent_index,
-                    depth,
-                    rank + 1,
-                    sibling_logw,
-                    sibling_score,
-                ),
+                (-sibling_logw, sibling_ranks, parent_index, depth, rank + 1, sibling_logw),
             )
 
         if depth < depth_limit:
             child_ranks = ranks + (0,)
             child_logw = logw + float(top_log_probs_np[depth, 0])
-            child_score = scorew + token_score(depth, 0)
             heapq.heappush(
                 heap,
-                (
-                    -child_score,
-                    child_ranks,
-                    current_index,
-                    depth + 1,
-                    0,
-                    child_logw,
-                    child_score,
-                ),
+                (-child_logw, child_ranks, current_index, depth + 1, 0, child_logw),
             )
 
     subtimes["tree_build_heap_time_s"] = time.perf_counter() - heap_start
@@ -204,7 +160,7 @@ def build_dtree_tree(
     subtimes["tree_build_visibility_time_s"] = time.perf_counter() - visibility_start
 
     visibility = mx.array(visibility_np, dtype=mx.bool_)
-    return node_token_ids, node_depths, node_ranks, parents, child_maps, visibility, subtimes
+    return node_token_ids, node_depths, parents, child_maps, visibility, subtimes
 
 
 def compile_dtree_tree(
@@ -397,20 +353,12 @@ def dtree_generate(
     acceptance_lengths: list[int] = []
     verified_tree_nodes: list[int] = []
     qwen35_tree_mode = os.environ.get("DTREE_QWEN35_TREE_MODE")
-    tree_score_mode = os.environ.get("DTREE_TREE_SCORE_MODE", "logprob")
-    if tree_score_mode not in {"logprob", "rank_accept"}:
-        raise ValueError(
-            "DTREE_TREE_SCORE_MODE must be 'logprob' or 'rank_accept'."
-        )
     # Qwen3.5 hybrid caches are expensive to materialize for every speculative
     # branch. The default tree path verifies only the branch the target follows.
     use_lazy_qwen35_tree = (
         target.adapter.family == "qwen3_5"
         and qwen35_tree_mode != "full_tree"
     )
-    max_rank = max(effective_tree_budget, 1)
-    rank_accept_success = [1.0 / (rank + 1) for rank in range(max_rank)]
-    rank_accept_failure = [1.0 for _ in range(max_rank)]
 
     decode_start = time.perf_counter()
     while start < total_max_tokens:
@@ -430,25 +378,14 @@ def dtree_generate(
         add_profile_elapsed(profile_times, "draft_time_s", draft_start)
 
         tree_build_start = profile_start(profile_times)
-        rank_score_bias = None
-        if tree_score_mode == "rank_accept":
-            rank_score_bias = current_rank_score_bias(
-                rank_accept_success,
-                rank_accept_failure,
-            )
         (
             node_token_ids,
             node_depths,
-            node_ranks,
             parents,
             child_maps,
             visibility,
             tree_build_subtimes,
-        ) = build_dtree_tree(
-            draft_logits[0],
-            effective_tree_budget,
-            rank_score_bias=rank_score_bias,
-        )
+        ) = build_dtree_tree(draft_logits[0], effective_tree_budget)
         add_profile_elapsed(profile_times, "tree_build_time_s", tree_build_start)
         if profile_times is not None:
             for key, value in tree_build_subtimes.items():
@@ -549,23 +486,6 @@ def dtree_generate(
         follow_tree_start = profile_start(profile_times)
         accepted_inputs = len(accepted_indices)
         accepted_token_ids = [tree_tokens[index] for index in accepted_indices]
-        if tree_score_mode == "rank_accept":
-            node_rank_lookup = [-1, *node_ranks]
-            for accepted_pos, current_index in enumerate(accepted_indices):
-                child_count = min(len(child_maps[current_index]), max_rank)
-                if child_count <= 0:
-                    continue
-                if accepted_pos + 1 < accepted_inputs:
-                    accepted_child_rank = node_rank_lookup[accepted_indices[accepted_pos + 1]]
-                    for rank in range(child_count):
-                        if rank < accepted_child_rank:
-                            rank_accept_failure[rank] += 1.0
-                        elif rank == accepted_child_rank:
-                            rank_accept_success[rank] += 1.0
-                            break
-                else:
-                    for rank in range(child_count):
-                        rank_accept_failure[rank] += 1.0
         add_profile_elapsed(
             profile_times,
             "bookkeeping_follow_tree_time_s",

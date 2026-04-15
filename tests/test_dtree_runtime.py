@@ -22,14 +22,13 @@ def test_build_dtree_tree_returns_prefix_closed_visibility():
         dtype=mx.float32,
     )
 
-    node_token_ids, node_depths, node_ranks, parents, child_maps, visibility, _ = build_dtree_tree(
+    node_token_ids, node_depths, parents, child_maps, visibility, _ = build_dtree_tree(
         draft_logits=draft_logits,
         budget=4,
     )
 
     assert node_token_ids
     assert len(node_token_ids) == len(node_depths)
-    assert len(node_token_ids) == len(node_ranks)
     assert parents[0] == -1
     assert visibility.shape[0] == 1 + len(node_token_ids)
     assert bool(visibility[0, 0].item()) is True
