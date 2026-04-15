@@ -344,7 +344,6 @@ class Qwen35TargetAdapter(MLXTargetAdapter):
         position_ids: mx.array,
         attention_mask: mx.array,
     ) -> tuple[mx.array, mx.array]:
-        del attention_mask
         norm_hidden_states, target_hidden, pending = forward_qwen35_tree_with_hidden_states(
             model,
             inputs,
@@ -352,6 +351,7 @@ class Qwen35TargetAdapter(MLXTargetAdapter):
             layer_ids,
             parents,
             position_ids,
+            attention_mask,
         )
         self._pending_tree_state = pending
         return norm_hidden_states, target_hidden
