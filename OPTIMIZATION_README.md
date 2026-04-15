@@ -113,8 +113,10 @@ Local Janet prompt check, `temperature=0`, `max_new_tokens=128`, 1 warmup run:
 |---|---|---:|---:|---:|
 | Qwen3.5-4B | Plain MLX-LM | 37.05 | 33.46 | — |
 | Qwen3.5-4B | DFlash | 48.27 | 45.30 | 5.12 |
+| Qwen3.5-4B | DTree (`spec=8`, `tree_budget=8`) | 17.51 | 17.10 | 4.57 |
 | Qwen3.5-9B | Plain MLX-LM | 18.97 | 17.40 | — |
 | Qwen3.5-9B | DFlash | 20.27 | 19.38 | 4.03 |
+| Qwen3.5-9B | DTree (`spec=8`, `tree_budget=8`) | 9.36 | 9.06 | 4.48 |
 
 Reference fork checked on the same prompt:
 
@@ -142,14 +144,14 @@ Experimental DTree status:
 - The tree path now reuses the compiled per-layer Qwen3.5 verifier kernels from the DFlash path. That helps a little, but it does not change the overall economics by itself.
 - On a short greedy Qwen3.5-4B check (`24` generated tokens), DTree matched DFlash token-for-token.
 
-Short Janet checks with `temperature=0` and `--speculative-tokens 8 --tree-budget 8`:
+Current short Janet checks with `temperature=0`, `max_new_tokens=128`, and `--speculative-tokens 8 --tree-budget 8`:
 
 | Model | Method | Gen TPS | End-to-end TPS | Mean accept |
 |---|---|---:|---:|---:|
-| Qwen3.5-4B | DFlash | 24.64 | 21.54 | 2.75 |
-| Qwen3.5-4B | DTree | 13.38 | 12.85 | 3.78 |
-| Qwen3.5-9B (`max_new_tokens=16`) | DFlash | 18.22 | 6.15 | 4.20 |
-| Qwen3.5-9B (`max_new_tokens=16`) | DTree | 7.29 | 6.82 | 3.20 |
+| Qwen3.5-4B | DFlash | 48.27 | 45.30 | 5.12 |
+| Qwen3.5-4B | DTree | 17.51 | 17.10 | 4.57 |
+| Qwen3.5-9B | DFlash | 20.27 | 19.38 | 4.03 |
+| Qwen3.5-9B | DTree | 9.36 | 9.06 | 4.48 |
 
 Conclusion:
 
