@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -22,6 +23,66 @@ def resolve_model_path(path_or_repo: str) -> Path:
     if path.exists():
         return path
     return Path(snapshot_download(path_or_repo))
+
+
+def _quantized_lm_head_argmax(
+    module: Any,
+    hidden_states: mx.array,
+) -> mx.array | None:
+    if hidden_states.ndim != 3:
+        return None
+
+    max_tokens = int(os.environ.get("DTREE_QWEN35_ARGMAX_MAX_TOKENS", "8"))
+    if int(hidden_states.shape[1]) > max_tokens:
+        return None
+
+    weight = getattr(module, "weight", None)
+    scales = getattr(module, "scales", None)
+    biases = getattr(module, "biases", None)
+    bits = getattr(module, "bits", None)
+    group_size = getattr(module, "group_size", None)
+    if (
+        weight is None
+        or scales is None
+        or biases is None
+        or bits is None
+        or group_size is None
+    ):
+        return None
+
+    chunk_rows = int(os.environ.get("DTREE_QWEN35_ARGMAX_CHUNK_ROWS", "32768"))
+    chunk_rows = max(1, chunk_rows)
+
+    flat_hidden = hidden_states.reshape(-1, hidden_states.shape[-1])
+    row_count = int(weight.shape[0])
+    best_values: mx.array | None = None
+    best_indices: mx.array | None = None
+
+    for start in range(0, row_count, chunk_rows):
+        end = min(start + chunk_rows, row_count)
+        logits = mx.quantized_matmul(
+            flat_hidden,
+            weight[start:end],
+            scales=scales[start:end],
+            biases=biases[start:end],
+            transpose=True,
+            group_size=group_size,
+            bits=bits,
+        )
+        chunk_values = mx.max(logits, axis=-1)
+        chunk_indices = mx.argmax(logits, axis=-1).astype(mx.int32) + start
+        if best_values is None or best_indices is None:
+            best_values = chunk_values
+            best_indices = chunk_indices
+            continue
+        take_chunk = chunk_values > best_values
+        best_values = mx.where(take_chunk, chunk_values, best_values)
+        # Preserve earlier indices on ties to match standard argmax semantics.
+        best_indices = mx.where(take_chunk, chunk_indices, best_indices)
+
+    if best_indices is None:
+        return None
+    return best_indices.reshape(hidden_states.shape[:-1]).astype(mx.uint32)
 
 
 class MLXTargetAdapter:
@@ -212,6 +273,19 @@ class Qwen35TargetAdapter(MLXTargetAdapter):
         if language_model.args.tie_word_embeddings:
             return text_model.embed_tokens.as_linear(hidden_states)
         return language_model.lm_head(hidden_states)
+
+    def lm_head_argmax(self, model, hidden_states: mx.array) -> mx.array:
+        language_model = model.language_model
+        text_model = language_model.model
+        lm_head = (
+            text_model.embed_tokens
+            if language_model.args.tie_word_embeddings
+            else language_model.lm_head
+        )
+        posterior = _quantized_lm_head_argmax(lm_head, hidden_states)
+        if posterior is not None:
+            return posterior
+        return super().lm_head_argmax(model, hidden_states)
 
     def forward_with_hidden_states(
         self,
