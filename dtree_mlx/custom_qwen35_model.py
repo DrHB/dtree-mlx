@@ -91,6 +91,7 @@ def make_gated_delta_state_kernel():
 GATED_DELTA_STATE_KERNEL = make_gated_delta_state_kernel()
 FULL_ATTENTION_VERIFY_COMPILED_FNS: dict[int, Any] = {}
 LINEAR_VERIFY_COMPILED_FNS: dict[int, Any] = {}
+LINEAR_SINGLE_STEP_COMPILED_FNS: dict[int, Any] = {}
 VERIFY_WITH_ROLLBACK_COMPILED_FNS: dict[tuple[int, tuple[int, ...], int], Any] = {}
 ENABLE_EXPLICIT_CACHE_COMPILED_VERIFY = False
 ENABLE_LINEAR_LAYER_COMPILED_VERIFY = True
@@ -266,6 +267,49 @@ def get_compiled_linear_verify_fn(layer):
 
     LINEAR_VERIFY_COMPILED_FNS[key] = compiled_linear_verify
     return compiled_linear_verify
+
+
+def get_compiled_linear_single_step_fn(layer):
+    key = id(layer)
+    compiled = LINEAR_SINGLE_STEP_COMPILED_FNS.get(key)
+    if compiled is not None:
+        return compiled
+
+    @mx.compile
+    def compiled_linear_step(
+        hidden_states: mx.array,
+        initial_conv_state: mx.array,
+        initial_state: mx.array,
+    ) -> tuple[mx.array, mx.array, mx.array]:
+        return forward_linear_layer_explicit(
+            layer,
+            hidden_states,
+            None,
+            initial_conv_state,
+            initial_state,
+        )
+
+    LINEAR_SINGLE_STEP_COMPILED_FNS[key] = compiled_linear_step
+    return compiled_linear_step
+
+
+def forward_linear_layer_single_step_compiled(
+    layer,
+    hidden_states: mx.array,
+    cache: ArraysCache | None,
+) -> mx.array:
+    if cache is None or cache[0] is None or cache[1] is None:
+        return layer(hidden_states, mask=None, cache=cache)
+
+    compiled = get_compiled_linear_single_step_fn(layer)
+    hidden_states, new_conv_state, new_state = compiled(
+        hidden_states,
+        cache[0],
+        cache[1],
+    )
+    cache[0] = new_conv_state
+    cache[1] = new_state
+    return hidden_states
 
 
 def forward_linear_layer_with_rollback_record(
@@ -488,6 +532,32 @@ def forward_linear_layer_explicit_with_record(
     hidden_states = layer.post_attention_layernorm(hidden_states)
     hidden_states = residual + layer.mlp(hidden_states)
     return hidden_states, new_conv_state, new_state, qkv, keys, values, g, beta
+
+
+def forward_linear_layer_explicit(
+    layer,
+    hidden_states: mx.array,
+    mask: mx.array | None,
+    initial_conv_state: mx.array,
+    initial_state: mx.array,
+) -> tuple[mx.array, mx.array, mx.array]:
+    (
+        hidden_states,
+        new_conv_state,
+        new_state,
+        _qkv,
+        _keys,
+        _values,
+        _g,
+        _beta,
+    ) = forward_linear_layer_explicit_with_record(
+        layer,
+        hidden_states,
+        mask,
+        initial_conv_state,
+        initial_state,
+    )
+    return hidden_states, new_conv_state, new_state
 
 
 def forward_full_attention_layer_explicit(
@@ -896,6 +966,9 @@ class Qwen3_5TextModel(nn.Module):
         input_embeddings: Optional[mx.array] = None,
         return_rollback_records: bool = False,
     ) -> tuple[mx.array, mx.array] | tuple[mx.array, mx.array, dict[int, dict[str, mx.array]]]:
+        full_layer_indices = [idx for idx, layer in enumerate(self.layers) if not layer.is_linear]
+        linear_layer_indices = [idx for idx, layer in enumerate(self.layers) if layer.is_linear]
+
         if (
             ENABLE_EXPLICIT_CACHE_COMPILED_VERIFY
             and (
@@ -905,8 +978,6 @@ class Qwen3_5TextModel(nn.Module):
                 and inputs.shape[1] > 1
             )
         ):
-            full_layer_indices = [idx for idx, layer in enumerate(self.layers) if not layer.is_linear]
-            linear_layer_indices = [idx for idx, layer in enumerate(self.layers) if layer.is_linear]
             if all(cache[idx].keys is not None and cache[idx].values is not None for idx in full_layer_indices) and all(
                 cache[idx][0] is not None and cache[idx][1] is not None for idx in linear_layer_indices
             ):
@@ -996,7 +1067,19 @@ class Qwen3_5TextModel(nn.Module):
                 rollback_records[idx] = rollback_record
             else:
                 if layer.is_linear:
-                    hidden_states = layer(hidden_states, mask=mask, cache=layer_cache)
+                    if (
+                        ENABLE_LINEAR_LAYER_COMPILED_VERIFY
+                        and not return_rollback_records
+                        and hidden_states.shape[1] == 1
+                        and mask is None
+                    ):
+                        hidden_states = forward_linear_layer_single_step_compiled(
+                            layer,
+                            hidden_states,
+                            layer_cache,
+                        )
+                    else:
+                        hidden_states = layer(hidden_states, mask=mask, cache=layer_cache)
                 else:
                     hidden_states = forward_full_attention_layer_dflash(
                         layer,
