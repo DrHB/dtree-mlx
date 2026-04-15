@@ -23,7 +23,7 @@
 | Qwen3.5-4B | Janet, DFlash | 48.27 | 45.30 | 5.12 | 1.00x | Reference |
 | Qwen3.5-4B | Janet, DTree lazy bf16 `spec=8 tree_budget=8` | 29.39 | 28.19 | 6.33 | 0.62x | Better, still behind DFlash |
 | Qwen3.5-4B | 8 gsm8k prompts, DFlash `q4_g64 spec=16` | 47.39 | 45.07 | 5.81 | 1.00x | Reference |
-| Qwen3.5-4B | 8 gsm8k prompts, DTree lazy `q4_g64 spec=16 tree_budget=24` | 50.55 | 48.31 | 6.95 | 1.07x | Keep |
+| Qwen3.5-4B | 8 gsm8k prompts, DTree lazy `q4_g64 spec=16 tree_budget=24` | 51.59 | 48.98 | 6.81 | 1.12x | Keep |
 | Qwen3.5-9B | Janet, DFlash | 20.27 | 19.38 | 4.03 | 1.00x | Keep |
 
 | Commit | Area | Experiment | Change | Result | Score | Decision |
@@ -63,6 +63,7 @@
 | `d61ba98` | Qwen3.5 DTree | Small-tree q4 setting | `q4_g64 spec=16 tree_budget=2` | Won short Janet, lost broader sweep | 1.05x short / 0.86x broad | Drop |
 | `e286574` | Qwen3.5 DTree | Lazy-budget sweep | Lazy path with `spec=16` and larger budgets | `tree_budget=24` best local point; bigger trees fell back | 1.07x | Keep `24` |
 | `4376dd8` | Qwen3.5 verifier | Quantized q4 top-1 argmax | Added a chunked exact `mx.quantized_matmul` top-1 path for small-token Qwen3.5 LM-head calls (`<=8` tokens) | On matched 8-prompt `q4_g64 spec=16 tree_budget=24` `parallel-greedy-argmax`, clean `HEAD` was DFlash `41.84` / DTree `43.95` e2e TPS and this patch moved to DFlash `42.14` / DTree `45.07` | 1.07x broad (`1.05x -> 1.07x`) | Keep |
+| `dd3f5ea` | Qwen3.5 verifier | Compiled lazy linear steps | Compiled only the single-token recurrent/linear Qwen3.5 verifier layers used by the lazy tree path, while leaving full-attention layers on the native cache path | Isolated hot-path microbench improved from `15.55 ms` to `14.38 ms` per warm-cache token step, and the broad 8-prompt `q4_g64 spec=16 tree_budget=24` slice moved to DFlash `43.92` / DTree lazy `48.98` e2e TPS | 1.12x broad | Keep |
 | `e286574` | Qwen3.5 DTree | q4 correctness sanity | `N=12`, `q4_g64 spec=16 tree_budget=24` | Plain `11/12`, DFlash `12/12`, DTree lazy `11/12` | 1.07x speed / 0.92x acc | Speed win, not accuracy win |
 | `e286574` | Qwen3.5 DTree | Short greedy exactness | 24-token q4 greedy check vs DFlash | Token-for-token match | Exactness confidence | Keep confidence |
 | `e286574` | Qwen3.5 DTree | Tree verified-node accounting | Lazy path counts verified nodes on followed path | Verified nodes now track acceptance length instead of fixed `tree_budget + 1` | Lower verifier work | Keep |
@@ -70,7 +71,7 @@
 | Validation | Setting | Result | Score | Decision |
 |---|---|---|---|---|
 | Qwen3 q4 sanity | `N=12`, `max_new_tokens=512` | bf16: plain `9/12`, DFlash `10/12`, DTree `11/12`; q4: plain `11/12`, DFlash `12/12`, DTree `11/12` | Mixed | q4 stays opt-in |
-| Qwen3.5-4B speed | 8 gsm8k prompts, `q4_g64 spec=16 tree_budget=24` | DFlash `45.07` e2e TPS, DTree lazy `48.31` e2e TPS | 1.07x | First clean 4B DTree speed win |
+| Qwen3.5-4B speed | 8 gsm8k prompts, `q4_g64 spec=16 tree_budget=24` | DFlash `43.92` e2e TPS, DTree lazy `48.98` e2e TPS | 1.12x | Current best 4B DTree speed win |
 | Qwen3.5-4B speed | 8 gsm8k prompts, `q4_g64 spec=16 tree_budget=24 full_tree parallel-greedy-argmax` | DFlash `42.11` e2e TPS, DTree full-tree `45.25` e2e TPS | 1.07x | Full-tree path is competitive again, but with much higher memory |
 | Qwen3.5-4B correctness | `N=12`, `q4_g64 spec=16 tree_budget=24` | DFlash `12/12`, DTree lazy `11/12` | 0.92x | Needs larger validation |
 
