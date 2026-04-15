@@ -40,6 +40,31 @@ def test_build_dtree_tree_returns_prefix_closed_visibility():
         assert bool(visibility[node_index, node_index].item()) is True
 
 
+def test_build_dtree_tree_sibling_bonus_can_prefer_early_breadth():
+    draft_logits = mx.array(
+        [
+            [5.0, 4.7, 1.0],
+            [6.0, 1.0, 0.0],
+        ],
+        dtype=mx.float32,
+    )
+
+    node_token_ids, node_depths, *_ = build_dtree_tree(
+        draft_logits=draft_logits,
+        budget=2,
+        sibling_bonus=0.0,
+    )
+    assert node_depths == [1, 2]
+
+    node_token_ids_bonus, node_depths_bonus, *_ = build_dtree_tree(
+        draft_logits=draft_logits,
+        budget=2,
+        sibling_bonus=0.5,
+    )
+    assert node_depths_bonus == [1, 1]
+    assert node_token_ids_bonus[1] != node_token_ids[1]
+
+
 def test_follow_verified_tree_walks_matching_children():
     child_maps = [
         {11: 1, 12: 2},
