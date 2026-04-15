@@ -82,15 +82,12 @@ def cache_compaction_eval_tensors(
 def build_dtree_tree(
     draft_logits: mx.array,
     budget: int,
-    score_mode: str = "logprob",
 ) -> tuple[list[int], list[int], list[int], list[dict[int, int]], mx.array, dict[str, float]]:
     subtimes = {name: 0.0 for name in DTREE_TREE_BUILD_STAGE_ORDER}
 
     if budget <= 0 or draft_logits.shape[0] == 0:
         visibility = mx.array([[True]], dtype=mx.bool_)
         return [], [], [-1], [dict()], visibility, subtimes
-    if score_mode not in {"logprob", "child_margin"}:
-        raise ValueError("score_mode must be 'logprob' or 'child_margin'.")
 
     topk = min(budget, int(draft_logits.shape[-1]))
     depth_limit = int(draft_logits.shape[0])
@@ -108,26 +105,12 @@ def build_dtree_tree(
     mx.eval(top_token_ids, top_log_probs)
     top_token_ids_np = np.array(top_token_ids, dtype=np.int64)
     top_log_probs_np = np.array(top_log_probs, dtype=np.float32)
-    if score_mode == "child_margin" and topk > 1:
-        top1_margin_bonus = np.maximum(
-            top_log_probs_np[:, 0] - top_log_probs_np[:, 1],
-            0.0,
-        )
-    else:
-        top1_margin_bonus = np.zeros(depth_limit, dtype=np.float32)
     subtimes["tree_build_copy_time_s"] = time.perf_counter() - copy_start
-
-    def token_score(depth_index: int, rank: int) -> float:
-        score = float(top_log_probs_np[depth_index, rank])
-        if score_mode == "child_margin" and rank == 0:
-            score += float(top1_margin_bonus[depth_index])
-        return score
 
     heap_start = time.perf_counter()
     first_logw = float(top_log_probs_np[0, 0])
-    first_score = token_score(0, 0)
-    heap: list[tuple[float, tuple[int, ...], int, int, int, float, float]] = [
-        (-first_score, (0,), 0, 1, 0, first_logw, first_score)
+    heap: list[tuple[float, tuple[int, ...], int, int, int, float]] = [
+        (-first_logw, (0,), 0, 1, 0, first_logw)
     ]
 
     node_token_ids: list[int] = []
@@ -136,7 +119,7 @@ def build_dtree_tree(
     child_maps: list[dict[int, int]] = [dict()]
 
     while heap and len(node_token_ids) < budget:
-        _, ranks, parent_index, depth, rank, logw, scorew = heapq.heappop(heap)
+        _, ranks, parent_index, depth, rank, logw = heapq.heappop(heap)
 
         token_id = int(top_token_ids_np[depth - 1, rank])
         current_index = len(node_token_ids) + 1
@@ -151,38 +134,17 @@ def build_dtree_tree(
             sibling_logw = logw - float(top_log_probs_np[depth - 1, rank]) + float(
                 top_log_probs_np[depth - 1, rank + 1]
             )
-            sibling_score = scorew - token_score(depth - 1, rank) + token_score(
-                depth - 1,
-                rank + 1,
-            )
             heapq.heappush(
                 heap,
-                (
-                    -sibling_score,
-                    sibling_ranks,
-                    parent_index,
-                    depth,
-                    rank + 1,
-                    sibling_logw,
-                    sibling_score,
-                ),
+                (-sibling_logw, sibling_ranks, parent_index, depth, rank + 1, sibling_logw),
             )
 
         if depth < depth_limit:
             child_ranks = ranks + (0,)
             child_logw = logw + float(top_log_probs_np[depth, 0])
-            child_score = scorew + token_score(depth, 0)
             heapq.heappush(
                 heap,
-                (
-                    -child_score,
-                    child_ranks,
-                    current_index,
-                    depth + 1,
-                    0,
-                    child_logw,
-                    child_score,
-                ),
+                (-child_logw, child_ranks, current_index, depth + 1, 0, child_logw),
             )
 
     subtimes["tree_build_heap_time_s"] = time.perf_counter() - heap_start
@@ -391,7 +353,6 @@ def dtree_generate(
     acceptance_lengths: list[int] = []
     verified_tree_nodes: list[int] = []
     qwen35_tree_mode = os.environ.get("DTREE_QWEN35_TREE_MODE")
-    tree_score_mode = os.environ.get("DTREE_TREE_SCORE_MODE", "logprob")
     # Qwen3.5 hybrid caches are expensive to materialize for every speculative
     # branch. The default tree path verifies only the branch the target follows.
     use_lazy_qwen35_tree = (
@@ -424,11 +385,7 @@ def dtree_generate(
             child_maps,
             visibility,
             tree_build_subtimes,
-        ) = build_dtree_tree(
-            draft_logits[0],
-            effective_tree_budget,
-            score_mode=tree_score_mode,
-        )
+        ) = build_dtree_tree(draft_logits[0], effective_tree_budget)
         add_profile_elapsed(profile_times, "tree_build_time_s", tree_build_start)
         if profile_times is not None:
             for key, value in tree_build_subtimes.items():
