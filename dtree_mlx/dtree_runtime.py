@@ -82,7 +82,6 @@ def cache_compaction_eval_tensors(
 def build_dtree_tree(
     draft_logits: mx.array,
     budget: int,
-    sibling_bonus: float = 0.0,
 ) -> tuple[list[int], list[int], list[int], list[dict[int, int]], mx.array, dict[str, float]]:
     subtimes = {name: 0.0 for name in DTREE_TREE_BUILD_STAGE_ORDER}
 
@@ -135,10 +134,9 @@ def build_dtree_tree(
             sibling_logw = logw - float(top_log_probs_np[depth - 1, rank]) + float(
                 top_log_probs_np[depth - 1, rank + 1]
             )
-            sibling_priority = sibling_logw + (float(sibling_bonus) / max(depth, 1))
             heapq.heappush(
                 heap,
-                (-sibling_priority, sibling_ranks, parent_index, depth, rank + 1, sibling_logw),
+                (-sibling_logw, sibling_ranks, parent_index, depth, rank + 1, sibling_logw),
             )
 
         if depth < depth_limit:
@@ -355,7 +353,6 @@ def dtree_generate(
     acceptance_lengths: list[int] = []
     verified_tree_nodes: list[int] = []
     qwen35_tree_mode = os.environ.get("DTREE_QWEN35_TREE_MODE")
-    tree_sibling_bonus = float(os.environ.get("DTREE_SIBLING_BONUS", "0"))
     # Qwen3.5 hybrid caches are expensive to materialize for every speculative
     # branch. The default tree path verifies only the branch the target follows.
     use_lazy_qwen35_tree = (
@@ -388,11 +385,7 @@ def dtree_generate(
             child_maps,
             visibility,
             tree_build_subtimes,
-        ) = build_dtree_tree(
-            draft_logits[0],
-            effective_tree_budget,
-            sibling_bonus=tree_sibling_bonus,
-        )
+        ) = build_dtree_tree(draft_logits[0], effective_tree_budget)
         add_profile_elapsed(profile_times, "tree_build_time_s", tree_build_start)
         if profile_times is not None:
             for key, value in tree_build_subtimes.items():
@@ -581,7 +574,6 @@ def dtree_generate(
         "target_cache_summary": target.cache_summary(target_cache),
         "speculative_tokens": block_size,
         "tree_budget": effective_tree_budget,
-        "tree_sibling_bonus": tree_sibling_bonus,
         "verify_mode": verify_mode,
     }
     if profile_times is not None:
