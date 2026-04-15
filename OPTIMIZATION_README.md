@@ -1,6 +1,6 @@
 # Optimization Notes
 
-Date: 2026-04-14
+Date: 2026-04-15
 
 This file keeps the short version of what we measured on the local Apple M2 Max.
 
@@ -113,10 +113,8 @@ Local Janet prompt check, `temperature=0`, `max_new_tokens=128`, 1 warmup run:
 |---|---|---:|---:|---:|
 | Qwen3.5-4B | Plain MLX-LM | 37.05 | 33.46 | — |
 | Qwen3.5-4B | DFlash | 48.27 | 45.30 | 5.12 |
-| Qwen3.5-4B | DTree (`spec=8`, `tree_budget=8`) | 17.51 | 17.10 | 4.57 |
 | Qwen3.5-9B | Plain MLX-LM | 18.97 | 17.40 | — |
 | Qwen3.5-9B | DFlash | 20.27 | 19.38 | 4.03 |
-| Qwen3.5-9B | DTree (`spec=8`, `tree_budget=8`) | 9.36 | 9.06 | 4.48 |
 
 Reference fork checked on the same prompt:
 
@@ -138,52 +136,43 @@ Takeaways:
   - `bstnxbt/dflash-mlx`: `17.46` gen TPS, `4.84` e2e TPS, `3.76` tokens/cycle
 - So the imported hybrid-target path helps more on long prefixes than on the short Janet prompt.
 
-Experimental DTree status:
+Qwen3.5 DTree update:
 
-- The repo now has a correctness-first `qwen3_5` DTree path that keeps the real caches untouched during tree verify and commits only the accepted path.
-- The tree path now reuses the compiled per-layer Qwen3.5 verifier kernels from the DFlash path. That helps a little, but it does not change the overall economics by itself.
-- On a short greedy Qwen3.5-4B check (`24` generated tokens), DTree matched DFlash token-for-token.
+- The useful change was not another tree-policy tweak. It was a lazy exact verifier for `qwen3_5`.
+- Instead of verifying the whole tree and then following one branch, the lazy path only verifies the branch the target actually takes.
+- That makes verified-node count track accepted-path length instead of fixed `tree_budget + 1`.
+- The older full-tree verifier is still reachable with `DTREE_QWEN35_TREE_MODE=full_tree`.
 
-Current short Janet checks with `temperature=0`, `max_new_tokens=128`, and `--speculative-tokens 8 --tree-budget 8`:
+Short Janet checks:
 
-| Model | Method | Gen TPS | End-to-end TPS | Mean accept |
-|---|---|---:|---:|---:|
-| Qwen3.5-4B | DFlash | 48.27 | 45.30 | 5.12 |
-| Qwen3.5-4B | DTree | 17.51 | 17.10 | 4.57 |
-| Qwen3.5-9B | DFlash | 20.27 | 19.38 | 4.03 |
-| Qwen3.5-9B | DTree | 9.36 | 9.06 | 4.48 |
+- bf16, `--speculative-tokens 8 --tree-budget 8`:
+  - DFlash: `48.27` gen TPS, `45.30` e2e TPS, accept `5.12`
+  - DTree lazy: `29.39` gen TPS, `28.19` e2e TPS, accept `6.33`
+- So bf16 Qwen3.5-4B DTree is much better than the old ~`17` e2e path, but still behind DFlash on that short prompt.
 
-Conclusion:
+Local q4 setting that held up:
 
-- `qwen3_5` DTree is functional and exact on the short 4B check.
-- It is not optimized yet, especially on 4B.
+- `--target-quant-bits 4 --target-quant-group-size 64`
+- `--speculative-tokens 16`
+- `--tree-budget 24`
 
-Useful local setting found later:
+Matched 8-prompt gsm8k slice, Qwen3.5-4B, `max_new_tokens=256`:
 
-- For Qwen3.5-4B on the short Janet check, bf16 DTree still trails DFlash even after the compiled-kernel reuse.
-- But `q4_g64` changes that:
-  - DFlash, `--speculative-tokens 16`: `36.55` gen TPS, `33.12` e2e TPS, accept `4.25`
-  - DTree, `--speculative-tokens 16 --tree-budget 2`: `38.76` gen TPS, `34.90` e2e TPS, accept `2.36`
-- On that same quantized target, DTree still matched DFlash token-for-token on a short greedy 4B check.
+| Method | Gen TPS | End-to-end TPS | Mean accept |
+|---|---:|---:|---:|
+| DFlash | 47.39 | 45.07 | 5.81 |
+| DTree lazy | 50.55 | 48.31 | 6.95 |
 
-Validation after the short-prompt crossover:
+Small correctness sanity slice on the same q4 setting (`N=12`, `max_new_tokens=512`):
 
-- The short Janet win did not hold on a broader local sweep.
-- 8-prompt gsm8k sweep, Qwen3.5-4B, `q4_g64`, `max_new_tokens=512`, `spec=16`, `tree_budget=2`:
-  - DFlash: `44.20` gen TPS, `42.92` e2e TPS, mean accept `5.90`
-  - DTree: `37.55` gen TPS, `36.69` e2e TPS, mean accept `2.76`
-- 30-prompt gsm8k correctness slice on the same setting:
-  - Plain: `20/30`
-  - DFlash: `20/30`
-  - DTree: `21/30`
+| Method | Accuracy |
+|---|---:|
+| Plain MLX-LM | 11/12 |
+| DFlash | 12/12 |
+| DTree lazy | 11/12 |
 
-So the current Qwen3.5-4B `q4` DTree setting is not a speed win on a broader sweep, even though it still looks slightly better on this small accuracy slice.
+Takeaway:
 
-DTree greedy verifier follow-up:
-
-- The repo now lets DTree honor `verify_mode`, instead of silently ignoring it.
-- `parallel-greedy-argmax` is exact and produces the same acceptance behavior as `parallel-replay` at `temperature=0`.
-- But on Qwen3.5-4B `q4_g64`, `spec=16`, `tree_budget=2`, 8-prompt gsm8k sweep:
-  - DTree `parallel-replay`: `39.04` gen TPS, `38.01` e2e TPS
-  - DTree `parallel-greedy-argmax`: `36.10` gen TPS, `35.21` e2e TPS
-- So the greedy tree verifier is not a win yet. That strongly suggests the missing piece is still a genuinely faster `lm_head_argmax` path, not just switching the runtime to call argmax.
+- This is the first local Qwen3.5-4B DTree setting that beats DFlash on a broader speed slice.
+- It does not yet beat DFlash on the small correctness slice.
+- The short greedy q4 check still matched DFlash token-for-token for `24` generated tokens, so the lazy path looks exact in the setting we checked.

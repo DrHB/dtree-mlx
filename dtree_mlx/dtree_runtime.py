@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import heapq
+import os
 import time
 from typing import Any
 
@@ -207,6 +208,88 @@ def follow_verified_tree(
     return accepted_indices, next_token
 
 
+def lazy_follow_tree_exact(
+    target: LoadedTargetModel,
+    target_cache: list[Any],
+    layer_ids: list[int],
+    tree_tokens: list[int],
+    child_maps: list[dict[int, int]],
+    temperature: float,
+    verify_mode: str,
+    profile_times: dict[str, float] | None,
+) -> tuple[list[int], int, mx.array]:
+    if target.adapter.family != "qwen3_5":
+        raise NotImplementedError("lazy_follow_tree_exact is only implemented for qwen3_5.")
+
+    target_model = target.model
+    if hasattr(target_model, "language_model") and hasattr(target_model.language_model, "model"):
+        text_model = target_model.language_model.model
+    elif hasattr(target_model, "model"):
+        text_model = target_model.model
+    else:
+        raise AttributeError(f"Unsupported qwen3_5 target model: {type(target_model)!r}")
+
+    accepted_indices: list[int] = []
+    hidden_chunks: list[mx.array] = []
+    current_index = 0
+
+    while True:
+        verify_forward_start = profile_start(profile_times)
+        input_ids = mx.array([[tree_tokens[current_index]]], dtype=mx.uint32)
+        norm_hidden_states, verifier_hidden = text_model.forward_dflash(
+            input_ids,
+            target_cache,
+            layer_ids,
+        )
+        if profile_times is not None:
+            mx.eval(norm_hidden_states, verifier_hidden)
+        add_profile_elapsed(
+            profile_times,
+            "verify_tree_forward_time_s",
+            verify_forward_start,
+        )
+
+        accepted_indices.append(current_index)
+        hidden_chunks.append(verifier_hidden)
+
+        if verify_mode == "parallel-greedy-argmax":
+            verify_argmax_start = profile_start(profile_times)
+            posterior = target.lm_head_argmax(norm_hidden_states)
+            if profile_times is not None:
+                mx.eval(posterior)
+            add_profile_elapsed(
+                profile_times,
+                "verify_tree_argmax_time_s",
+                verify_argmax_start,
+            )
+        else:
+            verify_logits_start = profile_start(profile_times)
+            verifier_logits = target.lm_head_logits(norm_hidden_states)
+            if profile_times is not None:
+                mx.eval(verifier_logits)
+            add_profile_elapsed(
+                profile_times,
+                "verify_tree_logits_time_s",
+                verify_logits_start,
+            )
+
+            verify_sample_start = profile_start(profile_times)
+            posterior = sample_tokens(verifier_logits, temperature)
+            if profile_times is not None:
+                mx.eval(posterior)
+            add_profile_elapsed(
+                profile_times,
+                "verify_tree_sample_time_s",
+                verify_sample_start,
+            )
+
+        posterior_token = int(posterior[0, 0].item())
+        next_index = child_maps[current_index].get(posterior_token)
+        if next_index is None:
+            return accepted_indices, posterior_token, mx.concatenate(hidden_chunks, axis=1)
+        current_index = next_index
+
+
 def dtree_generate(
     target: LoadedTargetModel,
     draft: DFlashDraftModel,
@@ -269,6 +352,13 @@ def dtree_generate(
     start = prompt_len
     acceptance_lengths: list[int] = []
     verified_tree_nodes: list[int] = []
+    qwen35_tree_mode = os.environ.get("DTREE_QWEN35_TREE_MODE")
+    # Qwen3.5 hybrid caches are expensive to materialize for every speculative
+    # branch. The default tree path verifies only the branch the target follows.
+    use_lazy_qwen35_tree = (
+        target.adapter.family == "qwen3_5"
+        and qwen35_tree_mode != "full_tree"
+    )
 
     decode_start = time.perf_counter()
     while start < total_max_tokens:
@@ -302,84 +392,98 @@ def dtree_generate(
                 profile_times[key] += value
 
         tree_compile_start = profile_start(profile_times)
-        verify_input_ids, tree_tokens, verify_position_ids, attention_mask = compile_dtree_tree(
-            root_token_id=block_tokens[0],
-            start=start,
-            node_token_ids=node_token_ids,
-            node_depths=node_depths,
-            visibility=visibility,
-            past_length=start,
-            verify_input_ids_buffer=verify_input_ids_buffer,
-            verify_position_ids_buffer=verify_position_ids_buffer,
-            attention_mask_buffer=attention_mask_buffer,
-        )
+        tree_tokens = [block_tokens[0], *node_token_ids]
+        if not use_lazy_qwen35_tree:
+            verify_input_ids, tree_tokens, verify_position_ids, attention_mask = compile_dtree_tree(
+                root_token_id=block_tokens[0],
+                start=start,
+                node_token_ids=node_token_ids,
+                node_depths=node_depths,
+                visibility=visibility,
+                past_length=start,
+                verify_input_ids_buffer=verify_input_ids_buffer,
+                verify_position_ids_buffer=verify_position_ids_buffer,
+                attention_mask_buffer=attention_mask_buffer,
+            )
         add_profile_elapsed(profile_times, "tree_compile_time_s", tree_compile_start)
 
         verify_start = profile_start(profile_times)
-        if profile_times is not None:
-            verify_forward_start = profile_start(profile_times)
-            norm_hidden_states, verifier_hidden = target.forward_tree_with_hidden_states(
-                verify_input_ids,
-                target_cache,
-                layer_ids,
-                parents=parents,
-                position_ids=verify_position_ids,
-                attention_mask=attention_mask,
+        if use_lazy_qwen35_tree:
+            accepted_indices, posterior_token, verifier_hidden = lazy_follow_tree_exact(
+                target=target,
+                target_cache=target_cache,
+                layer_ids=layer_ids,
+                tree_tokens=tree_tokens,
+                child_maps=child_maps,
+                temperature=temperature,
+                verify_mode=verify_mode,
+                profile_times=profile_times,
             )
-            mx.eval(norm_hidden_states, verifier_hidden)
-            add_profile_elapsed(
-                profile_times,
-                "verify_tree_forward_time_s",
-                verify_forward_start,
-            )
-
-            if verify_mode == "parallel-greedy-argmax":
-                verify_argmax_start = profile_start(profile_times)
-                posterior = target.lm_head_argmax(norm_hidden_states)
-                mx.eval(posterior)
-                add_profile_elapsed(
-                    profile_times,
-                    "verify_tree_argmax_time_s",
-                    verify_argmax_start,
-                )
-            else:
-                verify_logits_start = profile_start(profile_times)
-                verifier_logits = target.lm_head_logits(norm_hidden_states)
-                mx.eval(verifier_logits)
-                add_profile_elapsed(
-                    profile_times,
-                    "verify_tree_logits_time_s",
-                    verify_logits_start,
-                )
-
-                verify_sample_start = profile_start(profile_times)
-                posterior = sample_tokens(verifier_logits, temperature)
-                mx.eval(posterior)
-                add_profile_elapsed(
-                    profile_times,
-                    "verify_tree_sample_time_s",
-                    verify_sample_start,
-                )
         else:
-            norm_hidden_states, verifier_hidden = target.forward_tree_with_hidden_states(
-                verify_input_ids,
-                target_cache,
-                layer_ids,
-                parents=parents,
-                position_ids=verify_position_ids,
-                attention_mask=attention_mask,
-            )
-            if verify_mode == "parallel-greedy-argmax":
-                posterior = target.lm_head_argmax(norm_hidden_states)
+            if profile_times is not None:
+                verify_forward_start = profile_start(profile_times)
+                norm_hidden_states, verifier_hidden = target.forward_tree_with_hidden_states(
+                    verify_input_ids,
+                    target_cache,
+                    layer_ids,
+                    parents=parents,
+                    position_ids=verify_position_ids,
+                    attention_mask=attention_mask,
+                )
+                mx.eval(norm_hidden_states, verifier_hidden)
+                add_profile_elapsed(
+                    profile_times,
+                    "verify_tree_forward_time_s",
+                    verify_forward_start,
+                )
+
+                if verify_mode == "parallel-greedy-argmax":
+                    verify_argmax_start = profile_start(profile_times)
+                    posterior = target.lm_head_argmax(norm_hidden_states)
+                    mx.eval(posterior)
+                    add_profile_elapsed(
+                        profile_times,
+                        "verify_tree_argmax_time_s",
+                        verify_argmax_start,
+                    )
+                else:
+                    verify_logits_start = profile_start(profile_times)
+                    verifier_logits = target.lm_head_logits(norm_hidden_states)
+                    mx.eval(verifier_logits)
+                    add_profile_elapsed(
+                        profile_times,
+                        "verify_tree_logits_time_s",
+                        verify_logits_start,
+                    )
+
+                    verify_sample_start = profile_start(profile_times)
+                    posterior = sample_tokens(verifier_logits, temperature)
+                    mx.eval(posterior)
+                    add_profile_elapsed(
+                        profile_times,
+                        "verify_tree_sample_time_s",
+                        verify_sample_start,
+                    )
             else:
-                posterior = sample_tokens(target.lm_head_logits(norm_hidden_states), temperature)
-            mx.eval(posterior, verifier_hidden)
+                norm_hidden_states, verifier_hidden = target.forward_tree_with_hidden_states(
+                    verify_input_ids,
+                    target_cache,
+                    layer_ids,
+                    parents=parents,
+                    position_ids=verify_position_ids,
+                    attention_mask=attention_mask,
+                )
+                if verify_mode == "parallel-greedy-argmax":
+                    posterior = target.lm_head_argmax(norm_hidden_states)
+                else:
+                    posterior = sample_tokens(target.lm_head_logits(norm_hidden_states), temperature)
+                mx.eval(posterior, verifier_hidden)
+            posterior_tokens = posterior[0].tolist()
+            accepted_indices, posterior_token = follow_verified_tree(child_maps, posterior_tokens)
         add_profile_elapsed(profile_times, "verify_time_s", verify_start)
 
         bookkeeping_start = profile_start(profile_times)
         follow_tree_start = profile_start(profile_times)
-        posterior_tokens = posterior[0].tolist()
-        accepted_indices, posterior_token = follow_verified_tree(child_maps, posterior_tokens)
         accepted_inputs = len(accepted_indices)
         accepted_token_ids = [tree_tokens[index] for index in accepted_indices]
         add_profile_elapsed(
@@ -389,19 +493,20 @@ def dtree_generate(
         )
 
         compact_start = profile_start(profile_times)
-        target.compact_kv_caches(
-            target_cache,
-            past_length=start,
-            keep_current_indices=accepted_indices,
-        )
-        if profile_times is not None:
-            compact_tensors = cache_compaction_eval_tensors(
+        if not use_lazy_qwen35_tree:
+            target.compact_kv_caches(
                 target_cache,
                 past_length=start,
-                keep_count=accepted_inputs,
+                keep_current_indices=accepted_indices,
             )
-            if compact_tensors:
-                mx.eval(*compact_tensors)
+            if profile_times is not None:
+                compact_tensors = cache_compaction_eval_tensors(
+                    target_cache,
+                    past_length=start,
+                    keep_count=accepted_inputs,
+                )
+                if compact_tensors:
+                    mx.eval(*compact_tensors)
         add_profile_elapsed(
             profile_times,
             "bookkeeping_cache_compact_time_s",
@@ -409,8 +514,11 @@ def dtree_generate(
         )
 
         hidden_select_start = profile_start(profile_times)
-        accepted_index_array = mx.array(accepted_indices, dtype=mx.uint32)
-        target_hidden = mx.take(verifier_hidden, accepted_index_array, axis=1)
+        if use_lazy_qwen35_tree:
+            target_hidden = verifier_hidden
+        else:
+            accepted_index_array = mx.array(accepted_indices, dtype=mx.uint32)
+            target_hidden = mx.take(verifier_hidden, accepted_index_array, axis=1)
         if profile_times is not None:
             mx.eval(target_hidden)
         add_profile_elapsed(
@@ -426,7 +534,7 @@ def dtree_generate(
         start += accepted_inputs
 
         acceptance_lengths.append(accepted_inputs)
-        verified_tree_nodes.append(len(tree_tokens))
+        verified_tree_nodes.append(accepted_inputs if use_lazy_qwen35_tree else len(tree_tokens))
         add_profile_elapsed(
             profile_times,
             "bookkeeping_output_commit_time_s",

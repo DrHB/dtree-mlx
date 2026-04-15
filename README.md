@@ -51,20 +51,23 @@ Notes:
 - The current `qwen3_5` path uses two imported ideas from `bstnxbt/dflash-mlx`: target-side hybrid rollback hooks and a context-only draft cache.
 - The 4B DFlash pair speeds up cleanly on this prompt. The 9B DFlash pair only gives a small local win on short prompts and still trails the best public MLX Qwen3.5 DFlash numbers.
 - On longer prompts, the imported hybrid-target path matters more. See [OPTIMIZATION_README.md](OPTIMIZATION_README.md).
-- `qwen3_5` now also has an experimental `dtree` path, but it is currently not competitive with DFlash.
-- On a short greedy 4B check, the experimental Qwen3.5 DTree path matches DFlash token output.
-- The first local Qwen3.5-4B crossover is with `--target-quant-bits 4 --target-quant-group-size 64 --speculative-tokens 16 --tree-budget 2`: `34.90` e2e TPS for DTree versus `33.12` for DFlash on the short Janet check.
+- `qwen3_5` DTree now defaults to a lazy exact verifier that only evaluates the followed path. Set `DTREE_QWEN35_TREE_MODE=full_tree` to compare against the older full-tree verifier.
 
-### Qwen3.5 DTree Experimental
+### Qwen3.5-4B DTree
 
-Current bf16 Janet checks with `--speculative-tokens 8 --tree-budget 8`:
+Local q4 sweep, Apple M2 Max, 8 gsm8k prompts, `temperature=0`, `max_new_tokens=256`:
 
-| Model | Method | Gen TPS | End-to-end TPS | Mean accept |
-|---|---|---:|---:|---:|
-| Qwen3.5-4B | DTree | 17.51 | 17.10 | 4.57 |
-| Qwen3.5-9B | DTree | 9.36 | 9.06 | 4.48 |
+| Method | Gen TPS | End-to-end TPS | Mean accept |
+|---|---:|---:|---:|
+| DFlash (`spec=16`) | 47.39 | 45.07 | 5.81 |
+| DTree lazy (`spec=16`, `tree_budget=24`) | 50.55 | 48.31 | 6.95 |
 
-These runs are included for completeness only. The current `qwen3_5` DTree path is functional, but not yet a speed win over DFlash.
+Notes:
+
+- The lazy verifier is the first local Qwen3.5-4B DTree path that beats DFlash on a broader speed slice.
+- On a short greedy q4 check, DTree still matched DFlash token-for-token for 24 generated tokens.
+- Small gsm8k correctness slice on the same q4 setting (`N=12`): plain `11/12`, DFlash `12/12`, DTree `11/12`.
+- bf16 Qwen3.5-4B DTree is better than before, but still behind DFlash on the short Janet prompt: about `28.19` e2e TPS with `--speculative-tokens 8 --tree-budget 8`.
 
 ## Reproduce
 
@@ -153,6 +156,15 @@ uv run dtree-mlx \
     --target-model mlx-community/Qwen3.5-9B-bf16 \
     --draft-model z-lab/Qwen3.5-9B-DFlash \
     --decode-mode dflash
+
+uv run dtree-mlx \
+    --target-model mlx-community/Qwen3.5-4B-bf16 \
+    --draft-model z-lab/Qwen3.5-4B-DFlash \
+    --decode-mode dtree \
+    --target-quant-bits 4 \
+    --target-quant-group-size 64 \
+    --speculative-tokens 16 \
+    --tree-budget 24
 ```
 
 Benchmark datasets:
@@ -191,6 +203,7 @@ uv run pytest tests/ -v
 - `dtree-mlx-compare` alternates DFlash/DTree order across prompts.
 - `parallel-replay` is still available, but it is not the fast Qwen3 baseline.
 - `qwen3_5` defaults to `draft_attention_mask=none`.
+- `qwen3_5` DTree defaults to the lazy exact verifier; set `DTREE_QWEN35_TREE_MODE=full_tree` to force the older full-tree verifier.
 - Upstream `dflash-mlx` M4 Max numbers are kept in [benchmarks/qwen3-results.md](benchmarks/qwen3-results.md) for reference only. They are not local `dtree-mlx` numbers.
 
 ## Credits
