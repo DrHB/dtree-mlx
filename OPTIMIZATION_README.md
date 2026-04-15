@@ -61,6 +61,7 @@
 | `e286574` | Qwen3.5 DTree | Full-tree fallback | `DTREE_QWEN35_TREE_MODE=full_tree` | Useful for comparison only | 0.62x | Keep fallback |
 | `d61ba98` | Qwen3.5 DTree | Small-tree q4 setting | `q4_g64 spec=16 tree_budget=2` | Won short Janet, lost broader sweep | 1.05x short / 0.86x broad | Drop |
 | `e286574` | Qwen3.5 DTree | Lazy-budget sweep | Lazy path with `spec=16` and larger budgets | `tree_budget=24` best local point; bigger trees fell back | 1.07x | Keep `24` |
+| `4376dd8` | Qwen3.5 verifier | Quantized q4 top-1 argmax | Added a chunked exact `mx.quantized_matmul` top-1 path for small-token Qwen3.5 LM-head calls (`<=8` tokens) | On matched 8-prompt `q4_g64 spec=16 tree_budget=24` `parallel-greedy-argmax`, clean `HEAD` was DFlash `41.84` / DTree `43.95` e2e TPS and this patch moved to DFlash `42.14` / DTree `45.07` | 1.07x broad (`1.05x -> 1.07x`) | Keep |
 | `e286574` | Qwen3.5 DTree | q4 correctness sanity | `N=12`, `q4_g64 spec=16 tree_budget=24` | Plain `11/12`, DFlash `12/12`, DTree lazy `11/12` | 1.07x speed / 0.92x acc | Speed win, not accuracy win |
 | `e286574` | Qwen3.5 DTree | Short greedy exactness | 24-token q4 greedy check vs DFlash | Token-for-token match | Exactness confidence | Keep confidence |
 | `e286574` | Qwen3.5 DTree | Tree verified-node accounting | Lazy path counts verified nodes on followed path | Verified nodes now track acceptance length instead of fixed `tree_budget + 1` | Lower verifier work | Keep |
@@ -75,5 +76,5 @@
 |---|---|---|
 | Larger Qwen3.5-4B correctness sweep | Current lazy q4 DTree wins on speed but not on the small accuracy slice | Next useful validation |
 | Better lazy-tree scoring | Lazy verification makes bigger trees cheaper; better branch ranking may raise acceptance more | Open |
-| Faster Qwen3.5 top-1 verifier | Could still reduce lazy-path cost further | Open |
+| Faster Qwen3.5 top-1 verifier | q4 chunked exact top-1 now helps small-token greedy verification, but larger-token and bf16 paths are still open | Partially landed |
 | Better draft than current `b16` | Acceptance is still limited by draft quality and block size | Open |
