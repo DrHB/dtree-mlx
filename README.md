@@ -34,26 +34,7 @@ Notes:
 
 More detail is in [OPTIMIZATION_README.md](OPTIMIZATION_README.md).
 
-## Qwen3.5
-
-Janet prompt, `temperature=0`, `max_new_tokens=128`, 1 warmup run, Apple M2 Max:
-
-| Model | Method | Gen TPS | End-to-end TPS | Mean accept |
-|---|---|---:|---:|---:|
-| Qwen3.5-4B | Plain MLX-LM | 37.05 | 33.46 | — |
-| Qwen3.5-4B | DFlash | 48.27 | 45.30 | 5.12 |
-| Qwen3.5-9B | Plain MLX-LM | 18.97 | 17.40 | — |
-| Qwen3.5-9B | DFlash | 20.27 | 19.38 | 4.03 |
-
-Notes:
-
-- The better default for `qwen3_5` is `--draft-attention-mask none`.
-- The current `qwen3_5` path uses two imported ideas from `bstnxbt/dflash-mlx`: target-side hybrid rollback hooks and a context-only draft cache.
-- The 4B DFlash pair speeds up cleanly on this prompt. The 9B DFlash pair only gives a small local win on short prompts and still trails the best public MLX Qwen3.5 DFlash numbers.
-- On longer prompts, the imported hybrid-target path matters more. See [OPTIMIZATION_README.md](OPTIMIZATION_README.md).
-- `qwen3_5` DTree now defaults to a lazy exact verifier that only evaluates the followed path. Set `DTREE_QWEN35_TREE_MODE=full_tree` to compare against the older full-tree verifier.
-
-### Qwen3.5-4B DTree
+## Qwen3.5-4B DTree
 
 Local q4 sweep, Apple M2 Max, 8 gsm8k prompts, `temperature=0`, `max_new_tokens=256`:
 
@@ -64,10 +45,13 @@ Local q4 sweep, Apple M2 Max, 8 gsm8k prompts, `temperature=0`, `max_new_tokens=
 
 Notes:
 
+- The better default for `qwen3_5` is `--draft-attention-mask none`.
+- The current `qwen3_5` path uses two imported ideas from `bstnxbt/dflash-mlx`: target-side hybrid rollback hooks and a context-only draft cache.
 - The lazy verifier is the first local Qwen3.5-4B DTree path that beats DFlash on a broader speed slice.
 - On a short greedy q4 check, DTree still matched DFlash token-for-token for 24 generated tokens.
 - Small gsm8k correctness slice on the same q4 setting (`N=12`): plain `11/12`, DFlash `12/12`, DTree `11/12`.
 - bf16 Qwen3.5-4B DTree is better than before, but still behind DFlash on the short Janet prompt: about `28.19` e2e TPS with `--speculative-tokens 8 --tree-budget 8`.
+- Set `DTREE_QWEN35_TREE_MODE=full_tree` to compare against the older full-tree verifier.
 
 ## Reproduce
 
