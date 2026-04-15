@@ -49,6 +49,7 @@
 | `f34a01f` | Qwen3.5 DFlash | 9B target-side hook import | Imported 9B hybrid-target tricks | Short-prompt gain modest, long-prefix path better | >1.00x on longer prefixes | Keep |
 | `31c348e` | Qwen3.5 DTree | Initial correctness-first tree | Full-tree exact verifier over hybrid caches | Exact, very slow | ~0.38x | Replaced |
 | `a3f43f0` | Qwen3.5 DTree | Full-attention tree batching | Ran full-attention tree layers over whole tree block | Real win, but not enough alone | ~0.47x | Keep in full-tree path |
+| `d8cde6c` | Qwen3.5 DTree | Batched recurrent tree verify | Ported a depth-grouped recurrent tree path with parent-aware Metal kernels for GatedDelta recurrence and causal conv, with a `DTREE_QWEN35_TREE_LINEAR_MODE=serial|batched` fallback switch | On `q4_g64 spec=16 tree_budget=24 full_tree parallel-greedy-argmax`, 3-prompt speed jumped from DTree `23.34` to `47.25` e2e TPS; the broader 8-prompt slice landed at DFlash `42.11` vs DTree `45.25` | 1.07x broad | Keep as full-tree path |
 | `local-only` | Qwen3.5 DTree | Compiled recurrent breadth path | Compiled breadth-by-depth recurrent tree layer | Flat to worse | <=1.00x | Drop |
 | `local-only` | Qwen3.5 DTree | Sequential exact tree | Walked real cache state branch-by-branch | Modest gain, memory-heavy | ~0.79x on Janet q4 | Drop |
 | `e286574` | Qwen3.5 DTree | Lazy exact verifier | Verified only the branch the target follows | First real 4B DTree win on broader speed slice | 1.07x | Keep default |
@@ -70,6 +71,7 @@
 |---|---|---|---|---|
 | Qwen3 q4 sanity | `N=12`, `max_new_tokens=512` | bf16: plain `9/12`, DFlash `10/12`, DTree `11/12`; q4: plain `11/12`, DFlash `12/12`, DTree `11/12` | Mixed | q4 stays opt-in |
 | Qwen3.5-4B speed | 8 gsm8k prompts, `q4_g64 spec=16 tree_budget=24` | DFlash `45.07` e2e TPS, DTree lazy `48.31` e2e TPS | 1.07x | First clean 4B DTree speed win |
+| Qwen3.5-4B speed | 8 gsm8k prompts, `q4_g64 spec=16 tree_budget=24 full_tree parallel-greedy-argmax` | DFlash `42.11` e2e TPS, DTree full-tree `45.25` e2e TPS | 1.07x | Full-tree path is competitive again, but with much higher memory |
 | Qwen3.5-4B correctness | `N=12`, `q4_g64 spec=16 tree_budget=24` | DFlash `12/12`, DTree lazy `11/12` | 0.92x | Needs larger validation |
 
 | Open lead | Why it still matters | Status |
