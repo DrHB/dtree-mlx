@@ -23,6 +23,7 @@ TOP_LEVEL_KEYS = [
 VERIFY_KEYS = [
     "verify_tree_forward_time_s",
     "verify_tree_logits_time_s",
+    "verify_tree_argmax_time_s",
     "verify_tree_sample_time_s",
 ]
 BOOKKEEPING_KEYS = [

@@ -176,3 +176,12 @@ Validation after the short-prompt crossover:
   - DTree: `21/30`
 
 So the current Qwen3.5-4B `q4` DTree setting is not a speed win on a broader sweep, even though it still looks slightly better on this small accuracy slice.
+
+DTree greedy verifier follow-up:
+
+- The repo now lets DTree honor `verify_mode`, instead of silently ignoring it.
+- `parallel-greedy-argmax` is exact and produces the same acceptance behavior as `parallel-replay` at `temperature=0`.
+- But on Qwen3.5-4B `q4_g64`, `spec=16`, `tree_budget=2`, 8-prompt gsm8k sweep:
+  - DTree `parallel-replay`: `39.04` gen TPS, `38.01` e2e TPS
+  - DTree `parallel-greedy-argmax`: `36.10` gen TPS, `35.21` e2e TPS
+- So the greedy tree verifier is not a win yet. That strongly suggests the missing piece is still a genuinely faster `lm_head_argmax` path, not just switching the runtime to call argmax.

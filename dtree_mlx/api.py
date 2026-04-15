@@ -117,6 +117,7 @@ class DFlashGenerator:
                     layer_ids=self.draft.target_layer_ids,
                     speculative_tokens=speculative_tokens,
                     tree_budget=tree_budget,
+                    verify_mode=verify_mode,
                     profile=profile,
                 )
             else:

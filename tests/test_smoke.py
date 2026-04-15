@@ -148,3 +148,64 @@ def test_generator_auto_mask_uses_target_family(monkeypatch):
 
     assert build_generator("qwen3") == ("none", "kv")
     assert build_generator("qwen3_5") == ("none", "context-only")
+
+
+def test_generator_passes_verify_mode_to_dtree(monkeypatch):
+    from dtree_mlx import api
+    import mlx.core as mx
+
+    fake_target = SimpleNamespace(
+        adapter=SimpleNamespace(family="qwen3_5"),
+        model=object(),
+        resolved_model_path=Path("/tmp/target"),
+        stop_token_ids=lambda: set(),
+        tokenizer=SimpleNamespace(decode=lambda tokens, skip_special_tokens=False: ""),
+    )
+    fake_draft = SimpleNamespace(
+        attention_mask_mode=None,
+        cache_mode=None,
+        block_size=16,
+        target_layer_ids=[],
+    )
+
+    captured: dict[str, object] = {}
+
+    monkeypatch.setattr(api, "load_target_model", lambda target_model: fake_target)
+    monkeypatch.setattr(
+        api,
+        "load_draft_model",
+        lambda draft_model: (fake_draft, Path("/tmp/draft")),
+    )
+    monkeypatch.setattr(
+        api,
+        "maybe_quantize_draft_model",
+        lambda draft, bits, group_size: {},
+    )
+
+    class FakeLimit:
+        def __init__(self, model):
+            self.model = model
+
+        def __enter__(self):
+            return None
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+    monkeypatch.setattr(api, "wired_limit", lambda model: FakeLimit(model))
+
+    def fake_dtree_generate(**kwargs):
+        captured.update(kwargs)
+        return [1, 2, 3], {"num_input_tokens": 2}
+
+    monkeypatch.setattr(api, "dtree_generate", fake_dtree_generate)
+
+    generator = api.DFlashGenerator()
+    result = generator.generate_from_tokens(
+        prompt_tokens=mx.array([1, 2], dtype=mx.uint32),
+        decode_mode="dtree",
+        verify_mode="parallel-greedy-argmax",
+    )
+
+    assert result.output_tokens == [1, 2, 3]
+    assert captured["verify_mode"] == "parallel-greedy-argmax"

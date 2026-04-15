@@ -35,6 +35,7 @@ DTREE_TREE_BUILD_STAGE_ORDER = (
 DTREE_VERIFY_DETAIL_STAGE_ORDER = (
     "verify_tree_forward_time_s",
     "verify_tree_logits_time_s",
+    "verify_tree_argmax_time_s",
     "verify_tree_sample_time_s",
 )
 DTREE_BOOKKEEPING_DETAIL_STAGE_ORDER = (
@@ -216,12 +217,20 @@ def dtree_generate(
     layer_ids: list[int],
     speculative_tokens: int | None,
     tree_budget: int | None = None,
+    verify_mode: str = "parallel-replay",
     profile: bool = False,
 ) -> tuple[list[int], dict[str, Any]]:
     if not target.supports_tree_verification():
         raise NotImplementedError(
             f"DTree is not implemented for target adapter family={target.adapter.family!r}."
         )
+    if verify_mode not in {"parallel-replay", "parallel-greedy-argmax"}:
+        raise ValueError(
+            "DTree only supports verify_mode='parallel-replay' or "
+            "'parallel-greedy-argmax'."
+        )
+    if verify_mode == "parallel-greedy-argmax" and temperature >= 1e-5:
+        raise ValueError("DTree parallel-greedy-argmax only supports temperature=0.")
 
     target_cache = target.make_cache()
     draft_cache = draft.make_cache()
@@ -324,23 +333,33 @@ def dtree_generate(
                 verify_forward_start,
             )
 
-            verify_logits_start = profile_start(profile_times)
-            verifier_logits = target.lm_head_logits(norm_hidden_states)
-            mx.eval(verifier_logits)
-            add_profile_elapsed(
-                profile_times,
-                "verify_tree_logits_time_s",
-                verify_logits_start,
-            )
+            if verify_mode == "parallel-greedy-argmax":
+                verify_argmax_start = profile_start(profile_times)
+                posterior = target.lm_head_argmax(norm_hidden_states)
+                mx.eval(posterior)
+                add_profile_elapsed(
+                    profile_times,
+                    "verify_tree_argmax_time_s",
+                    verify_argmax_start,
+                )
+            else:
+                verify_logits_start = profile_start(profile_times)
+                verifier_logits = target.lm_head_logits(norm_hidden_states)
+                mx.eval(verifier_logits)
+                add_profile_elapsed(
+                    profile_times,
+                    "verify_tree_logits_time_s",
+                    verify_logits_start,
+                )
 
-            verify_sample_start = profile_start(profile_times)
-            posterior = sample_tokens(verifier_logits, temperature)
-            mx.eval(posterior)
-            add_profile_elapsed(
-                profile_times,
-                "verify_tree_sample_time_s",
-                verify_sample_start,
-            )
+                verify_sample_start = profile_start(profile_times)
+                posterior = sample_tokens(verifier_logits, temperature)
+                mx.eval(posterior)
+                add_profile_elapsed(
+                    profile_times,
+                    "verify_tree_sample_time_s",
+                    verify_sample_start,
+                )
         else:
             norm_hidden_states, verifier_hidden = target.forward_tree_with_hidden_states(
                 verify_input_ids,
@@ -350,7 +369,10 @@ def dtree_generate(
                 position_ids=verify_position_ids,
                 attention_mask=attention_mask,
             )
-            posterior = sample_tokens(target.lm_head_logits(norm_hidden_states), temperature)
+            if verify_mode == "parallel-greedy-argmax":
+                posterior = target.lm_head_argmax(norm_hidden_states)
+            else:
+                posterior = sample_tokens(target.lm_head_logits(norm_hidden_states), temperature)
             mx.eval(posterior, verifier_hidden)
         add_profile_elapsed(profile_times, "verify_time_s", verify_start)
 
@@ -444,6 +466,7 @@ def dtree_generate(
         "target_cache_summary": target.cache_summary(target_cache),
         "speculative_tokens": block_size,
         "tree_budget": effective_tree_budget,
+        "verify_mode": verify_mode,
     }
     if profile_times is not None:
         profiled_time = sum(profile_times[name] for name in DTREE_STAGE_ORDER)

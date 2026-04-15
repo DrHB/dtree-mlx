@@ -84,7 +84,7 @@ def parse_args() -> argparse.Namespace:
         default="dflash",
         help=(
             "Speculative decode strategy. 'dtree' is currently implemented for "
-            "Qwen3 targets and reuses the same DFlash checkpoint."
+            "supported Qwen target adapters and reuses the same DFlash checkpoint."
         ),
     )
     parser.add_argument(
@@ -109,7 +109,8 @@ def parse_args() -> argparse.Namespace:
         help=(
             "Verifier strategy. All options are exact. 'parallel-greedy-argmax' "
             "only supports temperature=0. 'parallel-lazy-logits' keeps exact "
-            "prefix checks but computes verifier logits in chunks."
+            "prefix checks but computes verifier logits in chunks. DTree "
+            "currently supports 'parallel-replay' and 'parallel-greedy-argmax'."
         ),
     )
     parser.add_argument("--verify-chunk-size", type=int, default=4)
