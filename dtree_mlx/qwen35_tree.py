@@ -1,25 +1,41 @@
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass
 from typing import Any
 
 import mlx.core as mx
+import mlx.nn as nn
+from mlx.nn.layers.distributed import sum_gradients
+from mlx_lm.models.gated_delta import compute_g, gated_delta_update
 
 from .custom_qwen35_model import (
     get_compiled_linear_verify_fn,
 )
 from .qwen35_target import qwen35_full_attention_output
+from .qwen35_tree_kernels import tree_conv1d_kernel, tree_gated_delta_kernel
 
 
 @dataclass
 class Qwen35PendingTreeState:
     full_keys: dict[int, mx.array]
     full_values: dict[int, mx.array]
-    linear_conv_states: dict[int, list[mx.array]]
-    linear_states: dict[int, list[mx.array]]
+    linear_conv_states: dict[int, mx.array]
+    linear_states: dict[int, mx.array]
 
 
 FULL_ATTENTION_TREE_BLOCK_FNS: dict[int, Any] = {}
+_QWEN35_TREE_LINEAR_MODE = os.environ.get("DTREE_QWEN35_TREE_LINEAR_MODE", "batched").lower()
+_QWEN35_TREE_KERNEL_ENABLED = os.environ.get("DTREE_QWEN35_TREE_KERNEL", "1").lower() not in (
+    "",
+    "0",
+    "false",
+)
+_QWEN35_TREE_CONV_KERNEL_ENABLED = os.environ.get("DTREE_QWEN35_TREE_CONV_KERNEL", "1").lower() not in (
+    "",
+    "0",
+    "false",
+)
 
 
 def build_node_lineages(parents: list[int]) -> list[list[int]]:
@@ -83,6 +99,385 @@ def _initial_linear_state(layer: Any, layer_cache: Any, dtype: mx.Dtype) -> mx.a
         (1, linear.num_v_heads, linear.head_v_dim, linear.head_k_dim),
         dtype=dtype,
     )
+
+
+def _tree_depth_groups(parents: list[int]) -> list[list[int]]:
+    if not parents:
+        return []
+    if parents[0] != -1:
+        raise ValueError(f"tree root parent must be -1, got {parents[0]}")
+
+    depths = [0] * len(parents)
+    groups: list[list[int]] = [[0]]
+    for node_index in range(1, len(parents)):
+        parent_index = int(parents[node_index])
+        if parent_index < 0 or parent_index >= node_index:
+            raise ValueError(
+                f"tree parent index must precede child, got parents[{node_index}]={parent_index}"
+            )
+        depth = depths[parent_index] + 1
+        depths[node_index] = depth
+        while len(groups) <= depth:
+            groups.append([])
+        groups[depth].append(node_index)
+    return groups
+
+
+def _forward_linear_tree_serial(
+    layer: Any,
+    tree_hidden_states: mx.array,
+    layer_cache: Any,
+    parents: list[int],
+) -> tuple[mx.array, mx.array, mx.array]:
+    node_count = int(tree_hidden_states.shape[1])
+    node_hidden_states = [tree_hidden_states[:, index : index + 1, :] for index in range(node_count)]
+    next_node_hidden_states: list[mx.array] = []
+    node_conv_states: list[mx.array] = []
+    node_states: list[mx.array] = []
+
+    for node_index in range(node_count):
+        hidden_states = node_hidden_states[node_index]
+        parent_index = int(parents[node_index])
+        if parent_index >= 0:
+            initial_conv_state = node_conv_states[parent_index]
+            initial_state = node_states[parent_index]
+        else:
+            initial_conv_state = _initial_linear_conv_state(
+                layer,
+                layer_cache,
+                hidden_states.dtype,
+            )
+            initial_state = _initial_linear_state(
+                layer,
+                layer_cache,
+                hidden_states.dtype,
+            )
+        (
+            hidden_states,
+            new_conv_state,
+            new_state,
+            _qkv,
+            _keys,
+            _values,
+            _g,
+            _beta,
+        ) = get_compiled_linear_verify_fn(layer)(
+            hidden_states,
+            initial_conv_state,
+            initial_state,
+        )
+        next_node_hidden_states.append(hidden_states)
+        node_conv_states.append(new_conv_state)
+        node_states.append(new_state)
+
+    return (
+        mx.concatenate(next_node_hidden_states, axis=1),
+        mx.concatenate(node_states, axis=0),
+        mx.concatenate(node_conv_states, axis=0),
+    )
+
+
+def _forward_linear_tree_batched_kernel(
+    linear_attn: Any,
+    *,
+    qkv: mx.array,
+    z: mx.array,
+    a: mx.array,
+    b: mx.array,
+    base_state: mx.array,
+    base_conv_state: mx.array,
+    parents: list[int],
+    depth_groups: list[list[int]],
+    conv_weight: mx.array,
+    input_dtype: mx.Dtype,
+) -> tuple[mx.array, mx.array, mx.array] | None:
+    if not _QWEN35_TREE_KERNEL_ENABLED or mx.default_device() != mx.gpu or not mx.metal.is_available():
+        return None
+    if linear_attn.head_k_dim % 32 != 0:
+        return None
+
+    batch_size, tree_size, _ = qkv.shape
+    keep = int(linear_attn.conv_kernel_size) - 1
+    parents_mx = mx.array(parents, dtype=mx.int32)
+
+    conv_result = None
+    if _QWEN35_TREE_CONV_KERNEL_ENABLED:
+        conv_result = tree_conv1d_kernel(
+            qkv,
+            base_conv_state,
+            conv_weight,
+            parents_mx,
+        )
+
+    if conv_result is not None:
+        conv_out, node_conv_states_full = conv_result
+        q_all, k_all, v_all = [
+            tensor.reshape(batch_size, tree_size, heads, dim)
+            for tensor, heads, dim in zip(
+                mx.split(conv_out, [linear_attn.key_dim, 2 * linear_attn.key_dim], -1),
+                [
+                    linear_attn.num_k_heads,
+                    linear_attn.num_k_heads,
+                    linear_attn.num_v_heads,
+                ],
+                [
+                    linear_attn.head_k_dim,
+                    linear_attn.head_k_dim,
+                    linear_attn.head_v_dim,
+                ],
+                strict=True,
+            )
+        ]
+        node_conv_states = node_conv_states_full[0]
+    else:
+        q_parts: list[mx.array | None] = [None] * tree_size
+        k_parts: list[mx.array | None] = [None] * tree_size
+        v_parts: list[mx.array | None] = [None] * tree_size
+        node_conv_state_parts: list[mx.array | None] = [None] * tree_size
+
+        for indices in depth_groups:
+            if not indices:
+                continue
+
+            index_array = mx.array(indices, dtype=mx.int32)
+            group_size = len(indices)
+            parent_conv_states = []
+            for tree_index in indices:
+                parent_index = int(parents[tree_index])
+                if parent_index < 0:
+                    parent_conv_states.append(base_conv_state)
+                else:
+                    parent_conv_state = node_conv_state_parts[parent_index]
+                    if parent_conv_state is None:
+                        return None
+                    parent_conv_states.append(parent_conv_state)
+
+            conv_state = mx.concatenate(parent_conv_states, axis=0)
+            qkv_step = mx.take(qkv, index_array, axis=1).reshape(
+                group_size, 1, linear_attn.conv_dim
+            )
+            conv_input = mx.concatenate([conv_state, qkv_step], axis=1)
+            new_conv_state = (
+                mx.contiguous(conv_input[:, -keep:, :])
+                if keep > 0
+                else mx.zeros((group_size, 0, linear_attn.conv_dim), dtype=input_dtype)
+            )
+            conv_out = nn.silu(
+                (conv_input * conv_weight[None, :, :]).sum(axis=1)[:, None, :]
+            )
+            q, k, v = [
+                tensor.reshape(group_size, 1, heads, dim)
+                for tensor, heads, dim in zip(
+                    mx.split(conv_out, [linear_attn.key_dim, 2 * linear_attn.key_dim], -1),
+                    [
+                        linear_attn.num_k_heads,
+                        linear_attn.num_k_heads,
+                        linear_attn.num_v_heads,
+                    ],
+                    [
+                        linear_attn.head_k_dim,
+                        linear_attn.head_k_dim,
+                        linear_attn.head_v_dim,
+                    ],
+                    strict=True,
+                )
+            ]
+            for group_pos, tree_index in enumerate(indices):
+                q_parts[tree_index] = q[group_pos : group_pos + 1]
+                k_parts[tree_index] = k[group_pos : group_pos + 1]
+                v_parts[tree_index] = v[group_pos : group_pos + 1]
+                node_conv_state_parts[tree_index] = new_conv_state[group_pos : group_pos + 1]
+
+        if (
+            any(part is None for part in q_parts)
+            or any(part is None for part in k_parts)
+            or any(part is None for part in v_parts)
+            or any(state is None for state in node_conv_state_parts)
+        ):
+            return None
+
+        q_all = mx.concatenate(q_parts, axis=1)  # type: ignore[arg-type]
+        k_all = mx.concatenate(k_parts, axis=1)  # type: ignore[arg-type]
+        v_all = mx.concatenate(v_parts, axis=1)  # type: ignore[arg-type]
+        node_conv_states = mx.concatenate(node_conv_state_parts, axis=0)  # type: ignore[arg-type]
+
+    inv_scale = k_all.shape[-1] ** -0.5
+    q_all = (inv_scale**2) * mx.fast.rms_norm(q_all, None, 1e-6)
+    k_all = inv_scale * mx.fast.rms_norm(k_all, None, 1e-6)
+    g = compute_g(linear_attn.A_log, a, linear_attn.dt_bias)
+    beta = mx.sigmoid(b)
+    kernel_result = tree_gated_delta_kernel(
+        q_all,
+        k_all,
+        v_all,
+        g,
+        beta,
+        base_state,
+        parents_mx,
+    )
+    if kernel_result is None:
+        return None
+
+    raw_out, node_states_full = kernel_result
+    out = linear_attn.norm(raw_out, z)
+    out = linear_attn.out_proj(out.reshape(batch_size, tree_size, -1))
+    if linear_attn.sharding_group is not None:
+        out = mx.distributed.all_sum(out, group=linear_attn.sharding_group)
+    return out, node_states_full[0], node_conv_states
+
+
+def _forward_linear_tree_batched(
+    layer: Any,
+    tree_hidden_states: mx.array,
+    layer_cache: Any,
+    parents: list[int],
+    depth_groups: list[list[int]],
+) -> tuple[mx.array, mx.array, mx.array]:
+    linear_attn = layer.linear_attn
+    residual = tree_hidden_states
+    inputs = layer.input_layernorm(tree_hidden_states)
+    batch_size, tree_size, _ = inputs.shape
+    if batch_size != 1:
+        raise ValueError("Qwen3.5 tree verification expects batch=1 for recurrent layers.")
+
+    if linear_attn.sharding_group is not None:
+        inputs = sum_gradients(linear_attn.sharding_group)(inputs)
+
+    qkv = linear_attn.in_proj_qkv(inputs)
+    z = linear_attn.in_proj_z(inputs).reshape(
+        batch_size,
+        tree_size,
+        linear_attn.num_v_heads,
+        linear_attn.head_v_dim,
+    )
+    b = linear_attn.in_proj_b(inputs)
+    a = linear_attn.in_proj_a(inputs)
+
+    base_conv_state = _initial_linear_conv_state(layer, layer_cache, inputs.dtype)
+    base_state = _initial_linear_state(layer, layer_cache, inputs.dtype)
+    conv_weight = linear_attn.conv1d.weight[:, :, 0].T
+
+    kernel_result = _forward_linear_tree_batched_kernel(
+        linear_attn,
+        qkv=qkv,
+        z=z,
+        a=a,
+        b=b,
+        base_state=base_state,
+        base_conv_state=base_conv_state,
+        parents=parents,
+        depth_groups=depth_groups,
+        conv_weight=conv_weight,
+        input_dtype=inputs.dtype,
+    )
+    if kernel_result is not None:
+        out, node_states, node_conv_states = kernel_result
+    else:
+        raw_outputs: list[mx.array | None] = [None] * tree_size
+        node_state_parts: list[mx.array | None] = [None] * tree_size
+        node_conv_state_parts: list[mx.array | None] = [None] * tree_size
+        keep = int(linear_attn.conv_kernel_size) - 1
+
+        for indices in depth_groups:
+            if not indices:
+                continue
+
+            index_array = mx.array(indices, dtype=mx.int32)
+            group_size = len(indices)
+            parent_states = []
+            parent_conv_states = []
+            for tree_index in indices:
+                parent_index = int(parents[tree_index])
+                if parent_index < 0:
+                    parent_states.append(base_state)
+                    parent_conv_states.append(base_conv_state)
+                else:
+                    parent_state = node_state_parts[parent_index]
+                    parent_conv_state = node_conv_state_parts[parent_index]
+                    if parent_state is None or parent_conv_state is None:
+                        raise ValueError("parent state missing during tree-aware verify")
+                    parent_states.append(parent_state)
+                    parent_conv_states.append(parent_conv_state)
+
+            state_in = mx.concatenate(parent_states, axis=0)
+            conv_state = mx.concatenate(parent_conv_states, axis=0)
+            qkv_step = mx.take(qkv, index_array, axis=1).reshape(
+                group_size, 1, linear_attn.conv_dim
+            )
+            conv_input = mx.concatenate([conv_state, qkv_step], axis=1)
+            new_conv_state = (
+                mx.contiguous(conv_input[:, -keep:, :])
+                if keep > 0
+                else mx.zeros((group_size, 0, linear_attn.conv_dim), dtype=inputs.dtype)
+            )
+            conv_out = nn.silu(
+                (conv_input * conv_weight[None, :, :]).sum(axis=1)[:, None, :]
+            )
+            q, k, v = [
+                tensor.reshape(group_size, 1, heads, dim)
+                for tensor, heads, dim in zip(
+                    mx.split(conv_out, [linear_attn.key_dim, 2 * linear_attn.key_dim], -1),
+                    [
+                        linear_attn.num_k_heads,
+                        linear_attn.num_k_heads,
+                        linear_attn.num_v_heads,
+                    ],
+                    [
+                        linear_attn.head_k_dim,
+                        linear_attn.head_k_dim,
+                        linear_attn.head_v_dim,
+                    ],
+                    strict=True,
+                )
+            ]
+
+            inv_scale = k.shape[-1] ** -0.5
+            q = (inv_scale**2) * mx.fast.rms_norm(q, None, 1e-6)
+            k = inv_scale * mx.fast.rms_norm(k, None, 1e-6)
+            a_step = mx.take(a, index_array, axis=1).reshape(
+                group_size, 1, linear_attn.num_v_heads
+            )
+            b_step = mx.take(b, index_array, axis=1).reshape(
+                group_size, 1, linear_attn.num_v_heads
+            )
+            out_step, state_out = gated_delta_update(
+                q,
+                k,
+                v,
+                a_step,
+                b_step,
+                linear_attn.A_log,
+                linear_attn.dt_bias,
+                state_in,
+                None,
+                use_kernel=not linear_attn.training,
+            )
+
+            for group_pos, tree_index in enumerate(indices):
+                raw_outputs[tree_index] = out_step[group_pos : group_pos + 1]
+                node_state_parts[tree_index] = state_out[group_pos : group_pos + 1]
+                node_conv_state_parts[tree_index] = new_conv_state[group_pos : group_pos + 1]
+
+        if (
+            any(output is None for output in raw_outputs)
+            or any(state is None for state in node_state_parts)
+            or any(state is None for state in node_conv_state_parts)
+        ):
+            raise ValueError("tree-aware linear verify did not produce every node output")
+
+        raw_out = mx.concatenate(raw_outputs, axis=1)  # type: ignore[arg-type]
+        out = linear_attn.norm(raw_out, z)
+        out = linear_attn.out_proj(out.reshape(batch_size, tree_size, -1))
+        if linear_attn.sharding_group is not None:
+            out = mx.distributed.all_sum(out, group=linear_attn.sharding_group)
+        node_states = mx.concatenate(node_state_parts, axis=0)  # type: ignore[arg-type]
+        node_conv_states = mx.concatenate(node_conv_state_parts, axis=0)  # type: ignore[arg-type]
+
+    hidden_states = residual + out
+    residual = hidden_states
+    hidden_states = layer.post_attention_layernorm(hidden_states)
+    hidden_states = residual + layer.mlp(hidden_states)
+    return hidden_states, node_states, node_conv_states
 
 
 def get_compiled_full_attention_tree_block_fn(layer: Any):
@@ -250,79 +645,40 @@ def forward_qwen35_tree_with_hidden_states(
 
     embedded = text_model.embed_tokens(inputs)
     target_layer_ids = set(layer_ids)
-    node_count = len(parents)
+    depth_groups = _tree_depth_groups(parents)
 
     pending = Qwen35PendingTreeState(
         full_keys={},
         full_values={},
-        linear_conv_states={
-            layer_idx: []
-            for layer_idx, layer in enumerate(text_model.layers)
-            if getattr(layer, "is_linear", False)
-        },
-        linear_states={
-            layer_idx: []
-            for layer_idx, layer in enumerate(text_model.layers)
-            if getattr(layer, "is_linear", False)
-        },
+        linear_conv_states={},
+        linear_states={},
     )
 
-    node_hidden_states = [embedded[:, index : index + 1, :] for index in range(node_count)]
     selected_hidden_states: list[mx.array] = []
-    tree_hidden_states: mx.array | None = None
+    tree_hidden_states = embedded
 
     for layer_idx, (layer, layer_cache) in enumerate(zip(text_model.layers, cache)):
         if getattr(layer, "is_linear", False):
-            if tree_hidden_states is not None:
-                node_hidden_states = [
-                    tree_hidden_states[:, index : index + 1, :]
-                    for index in range(node_count)
-                ]
-                tree_hidden_states = None
-
-            next_node_hidden_states: list[mx.array] = []
-            for node_index in range(node_count):
-                hidden_states = node_hidden_states[node_index]
-                parent_index = int(parents[node_index])
-                if parent_index >= 0:
-                    initial_conv_state = pending.linear_conv_states[layer_idx][parent_index]
-                    initial_state = pending.linear_states[layer_idx][parent_index]
-                else:
-                    initial_conv_state = _initial_linear_conv_state(
-                        layer,
-                        layer_cache,
-                        hidden_states.dtype,
-                    )
-                    initial_state = _initial_linear_state(
-                        layer,
-                        layer_cache,
-                        hidden_states.dtype,
-                    )
-                (
-                    hidden_states,
-                    new_conv_state,
-                    new_state,
-                    _qkv,
-                    _keys,
-                    _values,
-                    _g,
-                    _beta,
-                ) = get_compiled_linear_verify_fn(layer)(
-                    hidden_states,
-                    initial_conv_state,
-                    initial_state,
+            if _QWEN35_TREE_LINEAR_MODE == "serial":
+                tree_hidden_states, node_states, node_conv_states = _forward_linear_tree_serial(
+                    layer,
+                    tree_hidden_states,
+                    layer_cache,
+                    parents,
                 )
-                pending.linear_conv_states[layer_idx].append(new_conv_state)
-                pending.linear_states[layer_idx].append(new_state)
-                next_node_hidden_states.append(hidden_states)
-
-            node_hidden_states = next_node_hidden_states
+            else:
+                tree_hidden_states, node_states, node_conv_states = _forward_linear_tree_batched(
+                    layer,
+                    tree_hidden_states,
+                    layer_cache,
+                    parents,
+                    depth_groups,
+                )
+            pending.linear_conv_states[layer_idx] = node_conv_states
+            pending.linear_states[layer_idx] = node_states
             if layer_idx in target_layer_ids:
-                selected_hidden_states.append(mx.concatenate(node_hidden_states, axis=1))
+                selected_hidden_states.append(tree_hidden_states)
             continue
-
-        if tree_hidden_states is None:
-            tree_hidden_states = mx.concatenate(node_hidden_states, axis=1)
 
         tree_hidden_states, new_keys, new_values = forward_full_attention_tree_block(
             layer,
@@ -336,9 +692,6 @@ def forward_qwen35_tree_with_hidden_states(
 
         if layer_idx in target_layer_ids:
             selected_hidden_states.append(tree_hidden_states)
-
-    if tree_hidden_states is None:
-        tree_hidden_states = mx.concatenate(node_hidden_states, axis=1)
 
     verifier_hidden = (
         mx.concatenate(selected_hidden_states, axis=-1)
@@ -371,8 +724,8 @@ def commit_qwen35_tree_path(
 
         if layer_idx not in pending.linear_states:
             continue
-        layer_cache[0] = pending.linear_conv_states[layer_idx][deepest_index]
-        layer_cache[1] = pending.linear_states[layer_idx][deepest_index]
+        layer_cache[0] = pending.linear_conv_states[layer_idx][deepest_index : deepest_index + 1]
+        layer_cache[1] = pending.linear_states[layer_idx][deepest_index : deepest_index + 1]
         if hasattr(layer_cache, "left_padding"):
             layer_cache.left_padding = None
         if hasattr(layer_cache, "lengths"):
