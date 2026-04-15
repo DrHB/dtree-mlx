@@ -163,3 +163,16 @@ Useful local setting found later:
   - DFlash, `--speculative-tokens 16`: `36.55` gen TPS, `33.12` e2e TPS, accept `4.25`
   - DTree, `--speculative-tokens 16 --tree-budget 2`: `38.76` gen TPS, `34.90` e2e TPS, accept `2.36`
 - On that same quantized target, DTree still matched DFlash token-for-token on a short greedy 4B check.
+
+Validation after the short-prompt crossover:
+
+- The short Janet win did not hold on a broader local sweep.
+- 8-prompt gsm8k sweep, Qwen3.5-4B, `q4_g64`, `max_new_tokens=512`, `spec=16`, `tree_budget=2`:
+  - DFlash: `44.20` gen TPS, `42.92` e2e TPS, mean accept `5.90`
+  - DTree: `37.55` gen TPS, `36.69` e2e TPS, mean accept `2.76`
+- 30-prompt gsm8k correctness slice on the same setting:
+  - Plain: `20/30`
+  - DFlash: `20/30`
+  - DTree: `21/30`
+
+So the current Qwen3.5-4B `q4` DTree setting is not a speed win on a broader sweep, even though it still looks slightly better on this small accuracy slice.
