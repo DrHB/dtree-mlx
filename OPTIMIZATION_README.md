@@ -52,6 +52,7 @@
 | `local-only` | Qwen3.5 DTree | Compiled recurrent breadth path | Compiled breadth-by-depth recurrent tree layer | Flat to worse | <=1.00x | Drop |
 | `local-only` | Qwen3.5 DTree | Sequential exact tree | Walked real cache state branch-by-branch | Modest gain, memory-heavy | ~0.79x on Janet q4 | Drop |
 | `e286574` | Qwen3.5 DTree | Lazy exact verifier | Verified only the branch the target follows | First real 4B DTree win on broader speed slice | 1.07x | Keep default |
+| `2d02291` | Qwen3.5 DTree | Wider lazy candidate pool | Let `tree_budget=24` search a wider draft top-k pool (`candidate_topk=48`) before heap pruning | 3-prompt and 8-prompt q4 sweeps kept the same acceptance (`7.06` and `6.85`), so the small TPS drift was noise rather than a real tree gain | ~1.00x, same acceptance | Drop |
 | `dc60b2f` | Qwen3.5 DTree | Chunked lazy spine verifier | Verified a short best-child spine, rolled back on divergence, then continued from the matched sibling | `lazy_chunk_size=4` looked good on 3 prompts (`1.08x`) but on the 8-prompt q4 slice it only moved DTree from `46.45` to `46.55` e2e TPS | 1.05x broad, not meaningful vs chunk1 | Drop |
 | `e286574` | Qwen3.5 DTree | Full-tree fallback | `DTREE_QWEN35_TREE_MODE=full_tree` | Useful for comparison only | 0.62x | Keep fallback |
 | `d61ba98` | Qwen3.5 DTree | Small-tree q4 setting | `q4_g64 spec=16 tree_budget=2` | Won short Janet, lost broader sweep | 1.05x short / 0.86x broad | Drop |
