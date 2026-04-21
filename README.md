@@ -95,7 +95,10 @@ Native Metal status:
 
 - `zig build metal-bootstrap` now runs a tiny pure-Zig Metal compute pass on
   macOS and validates the output.
-- This is a bring-up path only, not full-model inference yet.
+- The first inference-shaped Metal kernel is now in place: an `8192 x 2048`
+  dense projection benchmark that mirrors the block-0 QKV projection shape.
+- The tracked harness now defaults to the Metal profile so round commits do not
+  accidentally fall back to CPU-only eval.
 
 Those results are tracked in:
 
@@ -123,7 +126,7 @@ That command:
 Primitive eval-only run:
 
 ```bash
-python3 scripts/zig_autoresearch.py --profile full --notes "baseline before simd"
+python3 scripts/zig_autoresearch.py --notes "baseline before next Metal kernel"
 ```
 
 Faster slices:
@@ -132,6 +135,18 @@ Faster slices:
 python3 scripts/zig_autoresearch.py --profile decode --notes "decode-only check"
 python3 scripts/zig_autoresearch.py --profile micro --notes "kernel-only check"
 python3 scripts/zig_autoresearch.py --profile metal --notes "Metal-only check"
+```
+
+Direct Metal projection benchmark:
+
+```bash
+./zig-out/bin/dtree-mlx-metal-bootstrap \
+  --bench \
+  --bench-kind matvec \
+  --bench-iters 20 \
+  --bench-warmup 5 \
+  --rows 8192 \
+  --cols 2048
 ```
 
 Regenerate the markdown summary and SVG plot from the CSV:

@@ -58,6 +58,18 @@ Run the native Metal bootstrap:
 zig build metal-bootstrap
 ```
 
+Run the first inference-shaped Metal projection benchmark:
+
+```bash
+./zig-out/bin/dtree-mlx-metal-bootstrap \
+  --bench \
+  --bench-kind matvec \
+  --bench-iters 20 \
+  --bench-warmup 5 \
+  --rows 8192 \
+  --cols 2048
+```
+
 Inspect GGUF metadata:
 
 ```bash

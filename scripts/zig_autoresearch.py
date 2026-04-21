@@ -5,6 +5,7 @@ import argparse
 import csv
 import json
 import math
+import os
 import platform
 import socket
 import subprocess
@@ -27,6 +28,7 @@ PLOT_SVG = EXPERIMENTS_DIR / "results.svg"
 RUNS_DIR = EXPERIMENTS_DIR / "runs"
 ZIG_BINARY = REPO_ROOT / "zig-out" / "bin" / "dtree-mlx-zig"
 METAL_BINARY = REPO_ROOT / "zig-out" / "bin" / "dtree-mlx-metal-bootstrap"
+ZIG_GLOBAL_CACHE_DIR = REPO_ROOT / ".zig-global-cache"
 
 
 @dataclass(frozen=True)
@@ -45,6 +47,7 @@ class SuiteSpec:
 
 SUITE_ORDER = [
     "metal_add_one",
+    "metal_qkv_projection",
     "logits_matvec",
     "blk0_qkv_projection",
     "full_token_pass",
@@ -64,7 +67,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "--profile",
         choices=["full", "decode", "micro", "metal"],
-        default="full",
+        default="metal",
         help="Benchmark subset to run. full = micro + decode.",
     )
     parser.add_argument(
@@ -155,6 +158,33 @@ def build_suite_specs(model: str, token_id: int, profile: str) -> list[SuiteSpec
                         "1048576",
                     ],
                     bench_rows=1048576,
+                    bench_iters=20,
+                    bench_warmup=5,
+                ),
+            ),
+            (
+                "metal_qkv_projection",
+                SuiteSpec(
+                    name="metal_qkv_projection",
+                    title="Metal QKV Projection",
+                    metric_key="metal_projection_passes_per_s",
+                    unit="projection/s",
+                    color="#0077b6",
+                    command=[
+                        metal_binary,
+                        "--bench",
+                        "--bench-kind",
+                        "matvec",
+                        "--bench-iters",
+                        "20",
+                        "--bench-warmup",
+                        "5",
+                        "--rows",
+                        "8192",
+                        "--cols",
+                        "2048",
+                    ],
+                    bench_rows=8192,
                     bench_iters=20,
                     bench_warmup=5,
                 ),
@@ -275,7 +305,7 @@ def build_suite_specs(model: str, token_id: int, profile: str) -> list[SuiteSpec
     elif profile == "decode":
         names = ["full_token_pass", "cached_decode"]
     elif profile == "metal":
-        names = ["metal_add_one"]
+        names = ["metal_add_one", "metal_qkv_projection"]
     else:
         names = SUITE_ORDER
     return [specs[name] for name in names]
@@ -399,11 +429,14 @@ def main(argv: list[str] | None = None) -> None:
 
 
 def run_checked(command: list[str], step_name: str) -> subprocess.CompletedProcess[str]:
+    env = dict(os.environ)
+    env.setdefault("ZIG_GLOBAL_CACHE_DIR", str(ZIG_GLOBAL_CACHE_DIR))
     completed = subprocess.run(
         command,
         cwd=REPO_ROOT,
         text=True,
         capture_output=True,
+        env=env,
     )
     if completed.returncode != 0:
         raise SystemExit(
@@ -683,19 +716,20 @@ def render_summary(rows: list[dict[str, Any]]) -> str:
             "",
             "## Recent Runs",
             "",
-            "| Run | Commit | Label | Metal elems/s | Cached tok/s | Fresh tok/s | QKV proj/s | Logits matvec/s |",
-            "|---|---|---|---:|---:|---:|---:|---:|",
+            "| Run | Commit | Label | Metal elems/s | Metal proj/s | Cached tok/s | Fresh tok/s | QKV proj/s | Logits matvec/s |",
+            "|---|---|---|---:|---:|---:|---:|---:|---:|",
         ]
     )
     for run in reversed(recent_runs):
         suites = run["suites"]
         label = run["label"] or run["notes"] or run["git_subject"] or ""
         lines.append(
-            "| `{run_id}` | `{commit}` | {label} | {metal} | {cached} | {fresh} | {qkv} | {matvec} |".format(
+            "| `{run_id}` | `{commit}` | {label} | {metal} | {metal_proj} | {cached} | {fresh} | {qkv} | {matvec} |".format(
                 run_id=run["run_id"],
                 commit=run["git_short_commit"],
                 label=label,
                 metal=table_metric(suites.get("metal_add_one")),
+                metal_proj=table_metric(suites.get("metal_qkv_projection")),
                 cached=table_metric(suites.get("cached_decode")),
                 fresh=table_metric(suites.get("full_token_pass")),
                 qkv=table_metric(suites.get("blk0_qkv_projection")),
@@ -878,6 +912,7 @@ def draw_panel(
 def suite_color(suite_name: str) -> str:
     colors = {
         "metal_add_one": "#00b4d8",
+        "metal_qkv_projection": "#0077b6",
         "logits_matvec": "#ff6b6b",
         "blk0_qkv_projection": "#f7b801",
         "full_token_pass": "#2ec4b6",

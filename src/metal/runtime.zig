@@ -8,6 +8,8 @@ const metal_path: []const u8 = "/System/Library/Frameworks/Metal.framework/Versi
 const foundation_path: []const u8 = "/System/Library/Frameworks/Foundation.framework/Versions/Current/Foundation";
 const libobjc_path: []const u8 = "/usr/lib/libobjc.A.dylib";
 
+const max_matvec_threadgroup_width: usize = 256;
+
 const MetalSource =
     \\#include <metal_stdlib>
     \\using namespace metal;
@@ -15,6 +17,38 @@ const MetalSource =
     \\kernel void add_one(device float *values [[buffer(0)]],
     \\                    uint gid [[thread_position_in_grid]]) {
     \\    values[gid] = values[gid] + 1.0f;
+    \\}
+    \\
+    \\kernel void dense_matvec_f32(device const float *matrix [[buffer(0)]],
+    \\                             device const float *vector [[buffer(1)]],
+    \\                             device float *output [[buffer(2)]],
+    \\                             constant uint &cols [[buffer(3)]],
+    \\                             uint2 gid [[thread_position_in_grid]],
+    \\                             uint lane [[thread_index_in_threadgroup]],
+    \\                             uint2 threads_per_group [[threads_per_threadgroup]]) {
+    \\    const uint row = gid.y;
+    \\    const uint group_width = threads_per_group.x;
+    \\    threadgroup float partials[256];
+    \\
+    \\    float acc = 0.0f;
+    \\    const uint base = row * cols;
+    \\    for (uint col = gid.x; col < cols; col += group_width) {
+    \\        acc = fma(matrix[base + col], vector[col], acc);
+    \\    }
+    \\
+    \\    partials[lane] = acc;
+    \\    threadgroup_barrier(mem_flags::mem_threadgroup);
+    \\
+    \\    for (uint stride = group_width >> 1; stride > 0; stride >>= 1) {
+    \\        if (lane < stride) {
+    \\            partials[lane] += partials[lane + stride];
+    \\        }
+    \\        threadgroup_barrier(mem_flags::mem_threadgroup);
+    \\    }
+    \\
+    \\    if (lane == 0) {
+    \\        output[row] = partials[0];
+    \\    }
     \\}
 ;
 
@@ -57,6 +91,25 @@ pub const BenchmarkResult = struct {
     }
 };
 
+pub const MatVecBenchmarkResult = struct {
+    device_name: []u8,
+    thread_execution_width: usize,
+    max_total_threads_per_threadgroup: usize,
+    rows: usize,
+    cols: usize,
+    bench_iters: usize,
+    bench_warmup: usize,
+    elapsed_s: f64,
+    projection_passes_per_s: f64,
+    output_rows_per_s: f64,
+    gflops: f64,
+    checksum: f64,
+
+    pub fn deinit(self: *MatVecBenchmarkResult, allocator: std.mem.Allocator) void {
+        allocator.free(self.device_name);
+    }
+};
+
 pub const Error = std.DynLib.Error || error{
     MissingSymbol,
     UnsupportedPlatform,
@@ -73,6 +126,8 @@ pub const Error = std.DynLib.Error || error{
     ValidationFailed,
     InvalidBenchIters,
     InvalidElementCount,
+    InvalidRowCount,
+    InvalidColCount,
     ClockGetTimeFailed,
     ClockOutOfRange,
 };
@@ -91,6 +146,7 @@ const Symbols = struct {
     msg_send_void_0: *const fn (Id, Sel) callconv(.c) void,
     msg_send_void_id: *const fn (Id, Sel, Id) callconv(.c) void,
     msg_send_void_id_usize_usize: *const fn (Id, Sel, Id, usize, usize) callconv(.c) void,
+    msg_send_void_ptr_usize_usize: *const fn (Id, Sel, ?*const anyopaque, usize, usize) callconv(.c) void,
     msg_send_void_size_size: *const fn (Id, Sel, MTLSize, MTLSize) callconv(.c) void,
     msg_send_ptr_0: *const fn (Id, Sel) callconv(.c) ?*anyopaque,
     msg_send_cstr_0: *const fn (Id, Sel) callconv(.c) ?[*:0]const u8,
@@ -105,14 +161,8 @@ const Session = struct {
     device: Id,
     queue: Id,
     library: Id,
-    function: Id,
-    pipeline: Id,
-    thread_execution_width: usize,
-    max_total_threads_per_threadgroup: usize,
 
     fn deinit(self: *Session) void {
-        release(&self.symbols, self.pipeline);
-        release(&self.symbols, self.function);
         release(&self.symbols, self.library);
         release(&self.symbols, self.queue);
         release(&self.symbols, self.device);
@@ -122,17 +172,32 @@ const Session = struct {
     }
 };
 
+const Pipeline = struct {
+    symbols: *const Symbols,
+    function: Id,
+    object: Id,
+    thread_execution_width: usize,
+    max_total_threads_per_threadgroup: usize,
+
+    fn deinit(self: *Pipeline) void {
+        release(self.symbols, self.object);
+        release(self.symbols, self.function);
+    }
+};
+
 pub fn runBootstrap(allocator: std.mem.Allocator) Error!Report {
     if (builtin.os.tag != .macos) return error.UnsupportedPlatform;
 
     var session = try createSession();
     defer session.deinit();
+    var pipeline = try createPipeline(&session, "add_one");
+    defer pipeline.deinit();
 
     const buffer = try allocateSharedBuffer(&session, DemoValues.len);
     defer release(&session.symbols, buffer.object);
     @memcpy(buffer.floats[0..DemoValues.len], DemoValues[0..]);
 
-    try dispatchAddOne(&session, buffer.object, DemoValues.len);
+    try dispatchAddOne(&session, &pipeline, buffer.object, DemoValues.len);
 
     var output: [DemoValues.len]f32 = undefined;
     @memcpy(output[0..], buffer.floats[0..DemoValues.len]);
@@ -147,8 +212,8 @@ pub fn runBootstrap(allocator: std.mem.Allocator) Error!Report {
             &session.symbols,
             session.symbols.msg_send_id_0(session.device, sel(&session.symbols, "name")) orelse return error.StringCreationFailed,
         ),
-        .thread_execution_width = session.thread_execution_width,
-        .max_total_threads_per_threadgroup = session.max_total_threads_per_threadgroup,
+        .thread_execution_width = pipeline.thread_execution_width,
+        .max_total_threads_per_threadgroup = pipeline.max_total_threads_per_threadgroup,
         .input = DemoValues,
         .output = output,
     };
@@ -166,18 +231,20 @@ pub fn runBenchmark(
 
     var session = try createSession();
     defer session.deinit();
+    var pipeline = try createPipeline(&session, "add_one");
+    defer pipeline.deinit();
 
     const buffer = try allocateSharedBuffer(&session, element_count);
     defer release(&session.symbols, buffer.object);
     fillPattern(buffer.floats, element_count);
 
     for (0..bench_warmup) |_| {
-        try dispatchAddOne(&session, buffer.object, element_count);
+        try dispatchAddOne(&session, &pipeline, buffer.object, element_count);
     }
 
     const start_ns = try monotonicNowNs();
     for (0..bench_iters) |_| {
-        try dispatchAddOne(&session, buffer.object, element_count);
+        try dispatchAddOne(&session, &pipeline, buffer.object, element_count);
     }
     const end_ns = try monotonicNowNs();
     const elapsed_s = @as(f64, @floatFromInt(end_ns - start_ns)) / @as(f64, std.time.ns_per_s);
@@ -197,14 +264,76 @@ pub fn runBenchmark(
             &session.symbols,
             session.symbols.msg_send_id_0(session.device, sel(&session.symbols, "name")) orelse return error.StringCreationFailed,
         ),
-        .thread_execution_width = session.thread_execution_width,
-        .max_total_threads_per_threadgroup = session.max_total_threads_per_threadgroup,
+        .thread_execution_width = pipeline.thread_execution_width,
+        .max_total_threads_per_threadgroup = pipeline.max_total_threads_per_threadgroup,
         .elements = element_count,
         .bench_iters = bench_iters,
         .bench_warmup = bench_warmup,
         .elapsed_s = elapsed_s,
         .dispatches_per_s = @as(f64, @floatFromInt(bench_iters)) / elapsed_s,
         .elements_per_s = (@as(f64, @floatFromInt(element_count)) * @as(f64, @floatFromInt(bench_iters))) / elapsed_s,
+        .checksum = checksum,
+    };
+}
+
+pub fn runMatVecBenchmark(
+    allocator: std.mem.Allocator,
+    rows: usize,
+    cols: usize,
+    bench_warmup: usize,
+    bench_iters: usize,
+) Error!MatVecBenchmarkResult {
+    if (builtin.os.tag != .macos) return error.UnsupportedPlatform;
+    if (rows == 0) return error.InvalidRowCount;
+    if (cols == 0) return error.InvalidColCount;
+    if (bench_iters == 0) return error.InvalidBenchIters;
+
+    const matrix_count = rows * cols;
+    var session = try createSession();
+    defer session.deinit();
+    var pipeline = try createPipeline(&session, "dense_matvec_f32");
+    defer pipeline.deinit();
+
+    const matrix = try allocateSharedBuffer(&session, matrix_count);
+    defer release(&session.symbols, matrix.object);
+    const vector = try allocateSharedBuffer(&session, cols);
+    defer release(&session.symbols, vector.object);
+    const output = try allocateSharedBuffer(&session, rows);
+    defer release(&session.symbols, output.object);
+
+    fillMatVecMatrix(matrix.floats, matrix_count);
+    fillMatVecVector(vector.floats, cols);
+    @memset(output.floats[0..rows], 0);
+
+    for (0..bench_warmup) |_| {
+        try dispatchDenseMatVec(&session, &pipeline, matrix.object, vector.object, output.object, rows, cols);
+    }
+
+    const start_ns = try monotonicNowNs();
+    for (0..bench_iters) |_| {
+        try dispatchDenseMatVec(&session, &pipeline, matrix.object, vector.object, output.object, rows, cols);
+    }
+    const end_ns = try monotonicNowNs();
+    const elapsed_s = @as(f64, @floatFromInt(end_ns - start_ns)) / @as(f64, std.time.ns_per_s);
+    const checksum = try validateMatVec(matrix.floats, vector.floats, output.floats, rows, cols);
+    const operations_per_pass = @as(f64, @floatFromInt(rows)) * @as(f64, @floatFromInt(cols)) * 2.0;
+
+    return .{
+        .device_name = try copyNSString(
+            allocator,
+            &session.symbols,
+            session.symbols.msg_send_id_0(session.device, sel(&session.symbols, "name")) orelse return error.StringCreationFailed,
+        ),
+        .thread_execution_width = pipeline.thread_execution_width,
+        .max_total_threads_per_threadgroup = pipeline.max_total_threads_per_threadgroup,
+        .rows = rows,
+        .cols = cols,
+        .bench_iters = bench_iters,
+        .bench_warmup = bench_warmup,
+        .elapsed_s = elapsed_s,
+        .projection_passes_per_s = @as(f64, @floatFromInt(bench_iters)) / elapsed_s,
+        .output_rows_per_s = (@as(f64, @floatFromInt(rows)) * @as(f64, @floatFromInt(bench_iters))) / elapsed_s,
+        .gflops = (operations_per_pass * @as(f64, @floatFromInt(bench_iters))) / elapsed_s / 1_000_000_000.0,
         .checksum = checksum,
     };
 }
@@ -230,7 +359,6 @@ fn createSession() Error!Session {
     errdefer release(&symbols, queue);
 
     const source = try nsString(&symbols, MetalSource);
-    const function_name = try nsString(&symbols, "add_one");
 
     var compile_error: Id = null;
     const library = symbols.msg_send_id_id_id_ptrid(
@@ -245,21 +373,6 @@ fn createSession() Error!Session {
     };
     errdefer release(&symbols, library);
 
-    var pipeline_error: Id = null;
-    const function = symbols.msg_send_id_id(library, sel(&symbols, "newFunctionWithName:"), function_name) orelse return error.FunctionLookupFailed;
-    errdefer release(&symbols, function);
-
-    const pipeline = symbols.msg_send_id_id_ptrid(
-        device,
-        sel(&symbols, "newComputePipelineStateWithFunction:error:"),
-        function,
-        &pipeline_error,
-    ) orelse {
-        if (pipeline_error) |err| try printNSError(err);
-        return error.PipelineCreationFailed;
-    };
-    errdefer release(&symbols, pipeline);
-
     return .{
         .libobjc = libobjc,
         .foundation = foundation,
@@ -268,10 +381,32 @@ fn createSession() Error!Session {
         .device = device,
         .queue = queue,
         .library = library,
+    };
+}
+
+fn createPipeline(session: *Session, function_name: [:0]const u8) Error!Pipeline {
+    const name = try nsString(&session.symbols, function_name);
+    var pipeline_error: Id = null;
+    const function = session.symbols.msg_send_id_id(session.library, sel(&session.symbols, "newFunctionWithName:"), name) orelse return error.FunctionLookupFailed;
+    errdefer release(&session.symbols, function);
+
+    const pipeline = session.symbols.msg_send_id_id_ptrid(
+        session.device,
+        sel(&session.symbols, "newComputePipelineStateWithFunction:error:"),
+        function,
+        &pipeline_error,
+    ) orelse {
+        if (pipeline_error) |err| try printNSError(err);
+        return error.PipelineCreationFailed;
+    };
+    errdefer release(&session.symbols, pipeline);
+
+    return .{
+        .symbols = &session.symbols,
         .function = function,
-        .pipeline = pipeline,
-        .thread_execution_width = symbols.msg_send_usize_0(pipeline, sel(&symbols, "threadExecutionWidth")),
-        .max_total_threads_per_threadgroup = symbols.msg_send_usize_0(pipeline, sel(&symbols, "maxTotalThreadsPerThreadgroup")),
+        .object = pipeline,
+        .thread_execution_width = session.symbols.msg_send_usize_0(pipeline, sel(&session.symbols, "threadExecutionWidth")),
+        .max_total_threads_per_threadgroup = session.symbols.msg_send_usize_0(pipeline, sel(&session.symbols, "maxTotalThreadsPerThreadgroup")),
     };
 }
 
@@ -290,16 +425,18 @@ fn allocateSharedBuffer(session: *Session, element_count: usize) Error!SharedBuf
     };
 }
 
-fn dispatchAddOne(session: *Session, buffer: Id, element_count: usize) Error!void {
+fn dispatchAddOne(session: *Session, pipeline: *const Pipeline, buffer: Id, element_count: usize) Error!void {
     const command_buffer = session.symbols.msg_send_id_0(session.queue, sel(&session.symbols, "commandBuffer")) orelse return error.CommandBufferCreationFailed;
+    defer release(&session.symbols, command_buffer);
     const encoder = session.symbols.msg_send_id_0(command_buffer, sel(&session.symbols, "computeCommandEncoder")) orelse return error.ComputeEncoderCreationFailed;
+    defer release(&session.symbols, encoder);
 
-    session.symbols.msg_send_void_id(encoder, sel(&session.symbols, "setComputePipelineState:"), session.pipeline);
+    session.symbols.msg_send_void_id(encoder, sel(&session.symbols, "setComputePipelineState:"), pipeline.object);
     session.symbols.msg_send_void_id_usize_usize(encoder, sel(&session.symbols, "setBuffer:offset:atIndex:"), buffer, 0, 0);
 
     const threads_per_group_width = chooseThreadgroupWidth(
-        session.thread_execution_width,
-        session.max_total_threads_per_threadgroup,
+        pipeline.thread_execution_width,
+        pipeline.max_total_threads_per_threadgroup,
         element_count,
     );
     session.symbols.msg_send_void_size_size(
@@ -321,11 +458,82 @@ fn dispatchAddOne(session: *Session, buffer: Id, element_count: usize) Error!voi
     session.symbols.msg_send_void_0(command_buffer, sel(&session.symbols, "waitUntilCompleted"));
 }
 
+fn dispatchDenseMatVec(
+    session: *Session,
+    pipeline: *const Pipeline,
+    matrix: Id,
+    vector: Id,
+    output: Id,
+    rows: usize,
+    cols: usize,
+) Error!void {
+    const cols_u32 = std.math.cast(u32, cols) orelse return error.InvalidColCount;
+    const threadgroup_width = chooseMatVecThreadgroupWidth(
+        pipeline.thread_execution_width,
+        pipeline.max_total_threads_per_threadgroup,
+        cols,
+    );
+
+    const command_buffer = session.symbols.msg_send_id_0(session.queue, sel(&session.symbols, "commandBuffer")) orelse return error.CommandBufferCreationFailed;
+    defer release(&session.symbols, command_buffer);
+    const encoder = session.symbols.msg_send_id_0(command_buffer, sel(&session.symbols, "computeCommandEncoder")) orelse return error.ComputeEncoderCreationFailed;
+    defer release(&session.symbols, encoder);
+
+    session.symbols.msg_send_void_id(encoder, sel(&session.symbols, "setComputePipelineState:"), pipeline.object);
+    session.symbols.msg_send_void_id_usize_usize(encoder, sel(&session.symbols, "setBuffer:offset:atIndex:"), matrix, 0, 0);
+    session.symbols.msg_send_void_id_usize_usize(encoder, sel(&session.symbols, "setBuffer:offset:atIndex:"), vector, 0, 1);
+    session.symbols.msg_send_void_id_usize_usize(encoder, sel(&session.symbols, "setBuffer:offset:atIndex:"), output, 0, 2);
+    session.symbols.msg_send_void_ptr_usize_usize(
+        encoder,
+        sel(&session.symbols, "setBytes:length:atIndex:"),
+        @ptrCast(&cols_u32),
+        @sizeOf(u32),
+        3,
+    );
+    session.symbols.msg_send_void_size_size(
+        encoder,
+        sel(&session.symbols, "dispatchThreads:threadsPerThreadgroup:"),
+        .{
+            .width = threadgroup_width,
+            .height = rows,
+            .depth = 1,
+        },
+        .{
+            .width = threadgroup_width,
+            .height = 1,
+            .depth = 1,
+        },
+    );
+    session.symbols.msg_send_void_0(encoder, sel(&session.symbols, "endEncoding"));
+    session.symbols.msg_send_void_0(command_buffer, sel(&session.symbols, "commit"));
+    session.symbols.msg_send_void_0(command_buffer, sel(&session.symbols, "waitUntilCompleted"));
+}
+
 fn chooseThreadgroupWidth(thread_execution_width: usize, max_total_threads: usize, element_count: usize) usize {
     const preferred = @min(@max(thread_execution_width * 8, thread_execution_width), max_total_threads);
     const capped = @min(preferred, element_count);
     const rounded = @max(thread_execution_width, (capped / thread_execution_width) * thread_execution_width);
     return @min(rounded, element_count);
+}
+
+fn chooseMatVecThreadgroupWidth(thread_execution_width: usize, max_total_threads: usize, cols: usize) usize {
+    const capped = @min(@min(max_total_threads, max_matvec_threadgroup_width), cols);
+    if (capped <= 1) return 1;
+
+    var candidate = highestPowerOfTwo(capped);
+    if (candidate < thread_execution_width and thread_execution_width <= capped) {
+        candidate = thread_execution_width;
+    }
+    return @max(candidate, 1);
+}
+
+fn highestPowerOfTwo(limit: usize) usize {
+    var value = limit;
+    var result: usize = 1;
+    while (value > 1) : (value >>= 1) {
+        result <<= 1;
+    }
+    return result;
 }
 
 fn fillPattern(values: [*]f32, element_count: usize) void {
@@ -334,8 +542,47 @@ fn fillPattern(values: [*]f32, element_count: usize) void {
     }
 }
 
+fn fillMatVecMatrix(values: [*]f32, element_count: usize) void {
+    for (0..element_count) |idx| {
+        values[idx] = matVecMatrixValue(idx);
+    }
+}
+
+fn fillMatVecVector(values: [*]f32, element_count: usize) void {
+    for (0..element_count) |idx| {
+        values[idx] = matVecVectorValue(idx);
+    }
+}
+
 fn initialValue(idx: usize) f32 {
     return @as(f32, @floatFromInt(idx % 251));
+}
+
+fn matVecMatrixValue(idx: usize) f32 {
+    const raw: i32 = @as(i32, @intCast(idx % 97)) - 48;
+    return @as(f32, @floatFromInt(raw)) * 0.03125;
+}
+
+fn matVecVectorValue(idx: usize) f32 {
+    const raw: i32 = @as(i32, @intCast(idx % 29)) - 14;
+    return @as(f32, @floatFromInt(raw)) * 0.0625;
+}
+
+fn validateMatVec(matrix: [*]const f32, vector: [*]const f32, output: [*]const f32, rows: usize, cols: usize) Error!f64 {
+    var checksum: f64 = 0;
+    for (0..rows) |row| {
+        const base = row * cols;
+        var expected: f64 = 0;
+        for (0..cols) |col| {
+            expected += @as(f64, matrix[base + col]) * @as(f64, vector[col]);
+        }
+        const expected_f32: f32 = @floatCast(expected);
+        const actual = output[row];
+        const tolerance = 0.05 + 0.001 * @abs(expected_f32);
+        if (@abs(actual - expected_f32) > tolerance) return error.ValidationFailed;
+        checksum += actual;
+    }
+    return checksum;
 }
 
 fn loadSymbols(libobjc: *std.DynLib, metal: *std.DynLib) Error!Symbols {
@@ -353,6 +600,7 @@ fn loadSymbols(libobjc: *std.DynLib, metal: *std.DynLib) Error!Symbols {
         .msg_send_void_0 = try lookupRequired(*const fn (Id, Sel) callconv(.c) void, libobjc, "objc_msgSend"),
         .msg_send_void_id = try lookupRequired(*const fn (Id, Sel, Id) callconv(.c) void, libobjc, "objc_msgSend"),
         .msg_send_void_id_usize_usize = try lookupRequired(*const fn (Id, Sel, Id, usize, usize) callconv(.c) void, libobjc, "objc_msgSend"),
+        .msg_send_void_ptr_usize_usize = try lookupRequired(*const fn (Id, Sel, ?*const anyopaque, usize, usize) callconv(.c) void, libobjc, "objc_msgSend"),
         .msg_send_void_size_size = try lookupRequired(*const fn (Id, Sel, MTLSize, MTLSize) callconv(.c) void, libobjc, "objc_msgSend"),
         .msg_send_ptr_0 = try lookupRequired(*const fn (Id, Sel) callconv(.c) ?*anyopaque, libobjc, "objc_msgSend"),
         .msg_send_cstr_0 = try lookupRequired(*const fn (Id, Sel) callconv(.c) ?[*:0]const u8, libobjc, "objc_msgSend"),
