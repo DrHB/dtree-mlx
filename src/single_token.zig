@@ -590,9 +590,7 @@ fn projectAllRows(
     out: []f32,
 ) !void {
     if (out.len < tensor.row_count) return error.OutputBufferTooSmall;
-    for (0..tensor.row_count) |row_idx| {
-        out[row_idx] = try tensor.dotRow(row_idx, input);
-    }
+    try parallel_rows.matvecRows(tensor, input, 0, tensor.row_count, out);
 }
 
 fn projectInterleavedGate(
