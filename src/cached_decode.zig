@@ -2,6 +2,7 @@ const std = @import("std");
 const gguf = @import("gguf.zig");
 const gguf_store = @import("gguf_store.zig");
 const ops = @import("ops.zig");
+const parallel_rows = @import("parallel_rows.zig");
 
 pub const OutputCandidate = struct {
     token_id: usize,
@@ -117,6 +118,7 @@ const LayerWeights = struct {
 const RecurrentCache = struct {
     conv_history: []f32,
     state: []f32,
+    conv_slot: usize,
 };
 
 const FullCache = struct {
@@ -304,9 +306,10 @@ pub const Engine = struct {
 
     pub fn reset(self: *Engine) void {
         self.position = 0;
-        for (self.recurrent_caches) |cache| {
+        for (self.recurrent_caches) |*cache| {
             @memset(cache.conv_history, 0);
             @memset(cache.state, 0);
+            cache.conv_slot = 0;
         }
         for (self.full_caches) |cache| {
             @memset(cache.k, 0);
@@ -415,7 +418,7 @@ pub const Engine = struct {
 
         switch (layer.kind) {
             .recurrent => |weights| try self.stepRecurrent(
-                self.recurrent_caches[layer.cache_index],
+                &self.recurrent_caches[layer.cache_index],
                 weights,
                 self.scratch.hidden1[0..embd],
                 self.scratch.hidden2[0..embd],
@@ -450,7 +453,7 @@ pub const Engine = struct {
 
     fn stepRecurrent(
         self: *Engine,
-        cache: RecurrentCache,
+        cache: *RecurrentCache,
         weights: RecurrentWeights,
         input: []const f32,
         out_hidden: []f32,
@@ -465,6 +468,7 @@ pub const Engine = struct {
         const v_len = head_v_dim * num_v_heads;
         const qkv_len = v_offset + v_len;
         const conv_hist_stride = qkv_len;
+        const conv_slots = self.hparams.ssm_conv_kernel - 1;
         const q_scale = @as(f32, @floatCast(1.0 / std.math.sqrt(@as(f64, @floatFromInt(head_k_dim)))));
 
         try projectAllRows(weights.qkv, input, self.scratch.wide0[0..qkv_len]);
@@ -483,12 +487,17 @@ pub const Engine = struct {
             );
         }
 
+        if (weights.conv.row_len != self.hparams.ssm_conv_kernel) return error.UnsupportedConvKernel;
+        if (conv_slots != 3) return error.UnsupportedConvKernel;
+        const hist0 = cache.conv_slot * conv_hist_stride;
+        const hist1 = ((cache.conv_slot + 1) % conv_slots) * conv_hist_stride;
+        const hist2 = ((cache.conv_slot + 2) % conv_slots) * conv_hist_stride;
         var kernel: [4]f32 = undefined;
         for (0..qkv_len) |channel_idx| {
             try weights.conv.dequantizeRow(channel_idx, kernel[0..weights.conv.row_len]);
-            const h0 = cache.conv_history[channel_idx];
-            const h1 = cache.conv_history[conv_hist_stride + channel_idx];
-            const h2 = cache.conv_history[2 * conv_hist_stride + channel_idx];
+            const h0 = cache.conv_history[hist0 + channel_idx];
+            const h1 = cache.conv_history[hist1 + channel_idx];
+            const h2 = cache.conv_history[hist2 + channel_idx];
             const current = self.scratch.wide0[channel_idx];
             self.scratch.wide2[channel_idx] = silu(
                 h0 * kernel[0] +
@@ -496,14 +505,9 @@ pub const Engine = struct {
                     h2 * kernel[2] +
                     current * kernel[3],
             );
+            cache.conv_history[hist0 + channel_idx] = current;
         }
-
-        if (self.hparams.ssm_conv_kernel != 4) return error.UnsupportedConvKernel;
-        for (0..qkv_len) |channel_idx| {
-            cache.conv_history[channel_idx] = cache.conv_history[conv_hist_stride + channel_idx];
-            cache.conv_history[conv_hist_stride + channel_idx] = cache.conv_history[2 * conv_hist_stride + channel_idx];
-            cache.conv_history[2 * conv_hist_stride + channel_idx] = self.scratch.wide0[channel_idx];
-        }
+        cache.conv_slot = (cache.conv_slot + 1) % conv_slots;
 
         l2NormalizeHeadsInPlace(
             self.scratch.wide2[0..q_len],
@@ -529,9 +533,6 @@ pub const Engine = struct {
             const state = cache.state[
                 v_head * head_v_dim * head_v_dim ..
             ][0 .. head_v_dim * head_v_dim];
-            for (state) |*value| {
-                value.* *= decay;
-            }
 
             const sk = self.scratch.expert0[0..head_v_dim];
             const delta = self.scratch.expert1[0..head_v_dim];
@@ -541,6 +542,7 @@ pub const Engine = struct {
                 const row = state[k_idx * head_v_dim ..][0..head_v_dim];
                 const k_value = k_vec[k_idx];
                 for (0..head_v_dim) |v_idx| {
+                    row[v_idx] *= decay;
                     sk[v_idx] += row[v_idx] * k_value;
                 }
             }
@@ -549,20 +551,14 @@ pub const Engine = struct {
                 delta[v_idx] = beta * (v_vec[v_idx] - sk[v_idx]);
             }
 
-            for (0..head_v_dim) |k_idx| {
-                const row = state[k_idx * head_v_dim ..][0..head_v_dim];
-                const k_value = k_vec[k_idx];
-                for (0..head_v_dim) |v_idx| {
-                    row[v_idx] += k_value * delta[v_idx];
-                }
-            }
-
             const output_head = self.scratch.wide0[v_head * head_v_dim ..][0..head_v_dim];
             @memset(output_head, 0);
             for (0..head_v_dim) |k_idx| {
-                const q_value = q_vec[k_idx] * q_scale;
                 const row = state[k_idx * head_v_dim ..][0..head_v_dim];
+                const k_value = k_vec[k_idx];
+                const q_value = q_vec[k_idx] * q_scale;
                 for (0..head_v_dim) |v_idx| {
+                    row[v_idx] += k_value * delta[v_idx];
                     output_head[v_idx] += row[v_idx] * q_value;
                 }
             }
@@ -714,6 +710,7 @@ fn initRecurrentCache(
     return .{
         .conv_history = conv_history,
         .state = state,
+        .conv_slot = 0,
     };
 }
 
@@ -881,6 +878,15 @@ fn scanOutput(
     argmax_logit: f32,
     top_count: usize,
 } {
+    if (top_out.len == 0) {
+        const best = try parallel_rows.argmaxRows(tensor, hidden);
+        return .{
+            .argmax_token_id = best.row_index,
+            .argmax_logit = best.value,
+            .top_count = 0,
+        };
+    }
+
     var argmax_token_id: usize = 0;
     var argmax_logit = -std.math.inf(f32);
     initCandidates(top_out);

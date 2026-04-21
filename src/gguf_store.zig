@@ -124,6 +124,7 @@ pub const TensorView = struct {
         const row_bytes = try self.row(row_index);
         return quant.dotRow(self.info.ggml_type, row_bytes, input);
     }
+
 };
 
 fn castUsize(value: u64) !usize {

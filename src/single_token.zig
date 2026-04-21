@@ -2,6 +2,7 @@ const std = @import("std");
 const gguf = @import("gguf.zig");
 const gguf_store = @import("gguf_store.zig");
 const ops = @import("ops.zig");
+const parallel_rows = @import("parallel_rows.zig");
 
 pub const OutputCandidate = struct {
     token_id: usize,
@@ -514,6 +515,15 @@ pub const Engine = struct {
         hidden: []const f32,
         top_out: []OutputCandidate,
     ) !RunResult {
+        if (top_out.len == 0) {
+            const best = try parallel_rows.argmaxRows(self.output, hidden);
+            return .{
+                .argmax_token_id = best.row_index,
+                .argmax_logit = best.value,
+                .top_count = 0,
+            };
+        }
+
         var argmax_token_id: usize = 0;
         var argmax_logit = -std.math.inf(f32);
         initCandidates(top_out);

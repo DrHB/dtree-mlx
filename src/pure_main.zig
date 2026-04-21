@@ -2,6 +2,7 @@ const std = @import("std");
 const gguf = @import("gguf.zig");
 const gguf_store = @import("gguf_store.zig");
 const ops = @import("ops.zig");
+const parallel_rows = @import("parallel_rows.zig");
 const single_token = @import("single_token.zig");
 const cached_decode = @import("cached_decode.zig");
 
@@ -374,9 +375,7 @@ fn printMatVecDetail(
     const output = try allocator.alloc(f32, rows_to_compute);
     defer allocator.free(output);
 
-    for (0..rows_to_compute) |idx| {
-        output[idx] = try tensor.dotRow(idx, input);
-    }
+    try parallel_rows.matvecRows(tensor, input, 0, rows_to_compute, output);
 
     try writer.writeAll("Tensor matvec\n");
     try writer.print("name: {s}\n", .{tensor.info.name});
@@ -741,10 +740,8 @@ fn runMatVecBenchPass(
 ) !void {
     if (output.len < rows_to_process) return error.OutputBufferTooSmall;
 
-    for (0..rows_to_process) |offset| {
-        const row_index = (start_row + offset) % tensor.row_count;
-        const value = try tensor.dotRow(row_index, input);
-        output[offset] = value;
+    try parallel_rows.matvecRows(tensor, input, start_row, rows_to_process, output);
+    for (output[0..rows_to_process]) |value| {
         checksum.* += value;
     }
 }
@@ -758,9 +755,8 @@ fn runTokenProjectionPass(
 ) !void {
     if (output.len < rows_to_process) return error.OutputBufferTooSmall;
 
-    for (0..rows_to_process) |idx| {
-        const value = try project.dotRow(idx, hidden);
-        output[idx] = value;
+    try parallel_rows.matvecRows(project, hidden, 0, rows_to_process, output);
+    for (output[0..rows_to_process]) |value| {
         checksum.* += value;
     }
 }
