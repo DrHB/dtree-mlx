@@ -517,7 +517,7 @@ fn chooseThreadgroupWidth(thread_execution_width: usize, max_total_threads: usiz
 }
 
 fn chooseMatVecThreadgroupWidth(thread_execution_width: usize, max_total_threads: usize, cols: usize) usize {
-    const capped = @min(@min(max_total_threads, max_matvec_threadgroup_width), cols);
+    const capped = @min(@min(@min(max_total_threads, max_matvec_threadgroup_width), cols), 128);
     if (capped <= 1) return 1;
 
     var candidate = highestPowerOfTwo(capped);
