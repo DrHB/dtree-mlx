@@ -9,13 +9,13 @@ text { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; }
 .axis-label { fill: #7b8ba1; font-size: 11px; }
 </style>
 <text class="title" x="28" y="36">Pure-Zig Optimization History</text>
-<text class="muted" x="28" y="60">Generated from experiments/results.csv on 2026-04-21T15:34:50.306930+00:00</text>
+<text class="muted" x="28" y="60">Generated from experiments/results.csv on 2026-04-21T15:39:43.916627+00:00</text>
 <g>
 <rect x="28" y="88" width="520" height="220" rx="18" fill="#0f1b2b" stroke="#1d3148" stroke-width="1"/>
 <text class="panel-title" x="46" y="116">Metal Add-One</text>
-<text class="panel-meta" x="46" y="132">latest 2997215949.69 elements/s   best 4642798317.47 elements/s</text>
-<text class="panel-meta" x="530" y="116" text-anchor="end">a074a09</text>
-<text class="panel-meta" x="530" y="132" text-anchor="end">2026-04-21T15:34:50.306930+00:00</text>
+<text class="panel-meta" x="46" y="132">latest 3008826398.85 elements/s   best 4642798317.47 elements/s</text>
+<text class="panel-meta" x="530" y="116" text-anchor="end">4c0566e</text>
+<text class="panel-meta" x="530" y="132" text-anchor="end">2026-04-21T15:39:43.916627+00:00</text>
 <line x1="82" y1="270.00" x2="530" y2="270.00" stroke="#1d3148" stroke-width="1"/>
 <text class="axis-label" x="36" y="274.00">2066353803.15</text>
 <line x1="82" y1="236.50" x2="530" y2="236.50" stroke="#1d3148" stroke-width="1"/>
@@ -26,35 +26,37 @@ text { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; }
 <text class="axis-label" x="36" y="173.50">4205722908.79</text>
 <line x1="82" y1="136.00" x2="530" y2="136.00" stroke="#1d3148" stroke-width="1"/>
 <text class="axis-label" x="36" y="140.00">4918845944.00</text>
-<polyline fill="none" stroke="#00b4d8" stroke-width="3" points="82.00,148.97 194.00,257.03 306.00,248.29 418.00,170.15 530.00,226.27"/>
+<polyline fill="none" stroke="#00b4d8" stroke-width="3" points="82.00,148.97 171.60,257.03 261.20,248.29 350.80,170.15 440.40,226.27 530.00,225.73"/>
 <circle cx="82.00" cy="148.97" r="3.0" fill="#00b4d8" stroke="#09111b" stroke-width="1.0"/>
-<circle cx="194.00" cy="257.03" r="3.0" fill="#00b4d8" stroke="#09111b" stroke-width="1.0"/>
-<circle cx="306.00" cy="248.29" r="3.0" fill="#00b4d8" stroke="#09111b" stroke-width="1.0"/>
-<circle cx="418.00" cy="170.15" r="3.0" fill="#00b4d8" stroke="#09111b" stroke-width="1.0"/>
-<circle cx="530.00" cy="226.27" r="4.5" fill="#00b4d8" stroke="#ffffff" stroke-width="1.5"/>
+<circle cx="171.60" cy="257.03" r="3.0" fill="#00b4d8" stroke="#09111b" stroke-width="1.0"/>
+<circle cx="261.20" cy="248.29" r="3.0" fill="#00b4d8" stroke="#09111b" stroke-width="1.0"/>
+<circle cx="350.80" cy="170.15" r="3.0" fill="#00b4d8" stroke="#09111b" stroke-width="1.0"/>
+<circle cx="440.40" cy="226.27" r="3.0" fill="#00b4d8" stroke="#09111b" stroke-width="1.0"/>
+<circle cx="530.00" cy="225.73" r="4.5" fill="#00b4d8" stroke="#ffffff" stroke-width="1.5"/>
 <text class="axis-label" x="82" y="296">oldest</text>
 <text class="axis-label" x="530" y="296" text-anchor="end">latest</text>
 </g>
 <g>
 <rect x="572" y="88" width="520" height="220" rx="18" fill="#0f1b2b" stroke="#1d3148" stroke-width="1"/>
 <text class="panel-title" x="590" y="116">Metal QKV Projection</text>
-<text class="panel-meta" x="590" y="132">latest 1965.80 projection/s   best 1965.80 projection/s</text>
-<text class="panel-meta" x="1074" y="116" text-anchor="end">a074a09</text>
-<text class="panel-meta" x="1074" y="132" text-anchor="end">2026-04-21T15:34:50.306930+00:00</text>
+<text class="panel-meta" x="590" y="132">latest 2262.96 projection/s   best 2262.96 projection/s</text>
+<text class="panel-meta" x="1074" y="116" text-anchor="end">4c0566e</text>
+<text class="panel-meta" x="1074" y="132" text-anchor="end">2026-04-21T15:39:43.916627+00:00</text>
 <line x1="626" y1="270.00" x2="1074" y2="270.00" stroke="#1d3148" stroke-width="1"/>
-<text class="axis-label" x="580" y="274.00">1200.28</text>
+<text class="axis-label" x="580" y="274.00">1164.62</text>
 <line x1="626" y1="236.50" x2="1074" y2="236.50" stroke="#1d3148" stroke-width="1"/>
-<text class="axis-label" x="580" y="240.50">1412.16</text>
+<text class="axis-label" x="580" y="240.50">1468.62</text>
 <line x1="626" y1="203.00" x2="1074" y2="203.00" stroke="#1d3148" stroke-width="1"/>
-<text class="axis-label" x="580" y="207.00">1624.05</text>
+<text class="axis-label" x="580" y="207.00">1772.63</text>
 <line x1="626" y1="169.50" x2="1074" y2="169.50" stroke="#1d3148" stroke-width="1"/>
-<text class="axis-label" x="580" y="173.50">1835.93</text>
+<text class="axis-label" x="580" y="173.50">2076.63</text>
 <line x1="626" y1="136.00" x2="1074" y2="136.00" stroke="#1d3148" stroke-width="1"/>
-<text class="axis-label" x="580" y="140.00">2047.81</text>
-<polyline fill="none" stroke="#0077b6" stroke-width="3" points="626.00,257.03 775.33,204.78 924.67,193.78 1074.00,148.97"/>
+<text class="axis-label" x="580" y="140.00">2380.63</text>
+<polyline fill="none" stroke="#0077b6" stroke-width="3" points="626.00,257.03 738.00,220.62 850.00,212.95 962.00,181.71 1074.00,148.97"/>
 <circle cx="626.00" cy="257.03" r="3.0" fill="#0077b6" stroke="#09111b" stroke-width="1.0"/>
-<circle cx="775.33" cy="204.78" r="3.0" fill="#0077b6" stroke="#09111b" stroke-width="1.0"/>
-<circle cx="924.67" cy="193.78" r="3.0" fill="#0077b6" stroke="#09111b" stroke-width="1.0"/>
+<circle cx="738.00" cy="220.62" r="3.0" fill="#0077b6" stroke="#09111b" stroke-width="1.0"/>
+<circle cx="850.00" cy="212.95" r="3.0" fill="#0077b6" stroke="#09111b" stroke-width="1.0"/>
+<circle cx="962.00" cy="181.71" r="3.0" fill="#0077b6" stroke="#09111b" stroke-width="1.0"/>
 <circle cx="1074.00" cy="148.97" r="4.5" fill="#0077b6" stroke="#ffffff" stroke-width="1.5"/>
 <text class="axis-label" x="626" y="296">oldest</text>
 <text class="axis-label" x="1074" y="296" text-anchor="end">latest</text>
@@ -62,21 +64,22 @@ text { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; }
 <g>
 <rect x="28" y="332" width="520" height="220" rx="18" fill="#0f1b2b" stroke="#1d3148" stroke-width="1"/>
 <text class="panel-title" x="46" y="360">Metal Logits Projection</text>
-<text class="panel-meta" x="46" y="376">latest 183.59 projection/s   best 183.59 projection/s</text>
-<text class="panel-meta" x="530" y="360" text-anchor="end">a074a09</text>
-<text class="panel-meta" x="530" y="376" text-anchor="end">2026-04-21T15:34:50.306930+00:00</text>
+<text class="panel-meta" x="46" y="376">latest 187.30 projection/s   best 187.30 projection/s</text>
+<text class="panel-meta" x="530" y="360" text-anchor="end">4c0566e</text>
+<text class="panel-meta" x="530" y="376" text-anchor="end">2026-04-21T15:39:43.916627+00:00</text>
 <line x1="82" y1="514.00" x2="530" y2="514.00" stroke="#1d3148" stroke-width="1"/>
-<text class="axis-label" x="36" y="518.00">0.00000</text>
+<text class="axis-label" x="36" y="518.00">183.14</text>
 <line x1="82" y1="480.50" x2="530" y2="480.50" stroke="#1d3148" stroke-width="1"/>
-<text class="axis-label" x="36" y="484.50">55.076</text>
+<text class="axis-label" x="36" y="484.50">184.29</text>
 <line x1="82" y1="447.00" x2="530" y2="447.00" stroke="#1d3148" stroke-width="1"/>
-<text class="axis-label" x="36" y="451.00">110.15</text>
+<text class="axis-label" x="36" y="451.00">185.44</text>
 <line x1="82" y1="413.50" x2="530" y2="413.50" stroke="#1d3148" stroke-width="1"/>
-<text class="axis-label" x="36" y="417.50">165.23</text>
+<text class="axis-label" x="36" y="417.50">186.60</text>
 <line x1="82" y1="380.00" x2="530" y2="380.00" stroke="#1d3148" stroke-width="1"/>
-<text class="axis-label" x="36" y="384.00">220.30</text>
-<polyline fill="none" stroke="#023e8a" stroke-width="3" points="82.00,402.33"/>
-<circle cx="82.00" cy="402.33" r="4.5" fill="#023e8a" stroke="#ffffff" stroke-width="1.5"/>
+<text class="axis-label" x="36" y="384.00">187.75</text>
+<polyline fill="none" stroke="#023e8a" stroke-width="3" points="82.00,501.03 530.00,392.97"/>
+<circle cx="82.00" cy="501.03" r="3.0" fill="#023e8a" stroke="#09111b" stroke-width="1.0"/>
+<circle cx="530.00" cy="392.97" r="4.5" fill="#023e8a" stroke="#ffffff" stroke-width="1.5"/>
 <text class="axis-label" x="82" y="540">oldest</text>
 <text class="axis-label" x="530" y="540" text-anchor="end">latest</text>
 </g>

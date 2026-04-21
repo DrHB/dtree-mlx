@@ -4,29 +4,29 @@ This file is generated from `experiments/results.csv`.
 
 ## Latest Run
 
-- Run: `20260421T153450.306930Z-a074a09-metal`
-- Time: `2026-04-21T15:34:50.306930+00:00`
-- Commit: `a074a09` on `codex/zig-baseline-qwen36`
+- Run: `20260421T153943.916627Z-4c0566e-metal`
+- Time: `2026-04-21T15:39:43.916627+00:00`
+- Commit: `4c0566e` on `codex/zig-baseline-qwen36`
 - Dirty tree: `False`
-- Subject: r010: add metal logits projection benchmark
-- Label: r010
-- Notes: add metal logits projection benchmark
+- Subject: r011: use median-of-three metal benchmark runs
+- Label: r011
+- Notes: use median-of-three metal benchmark runs
 
 ## Latest Metrics
 
 | Suite | Metric | Value | Delta vs previous same suite |
 |---|---|---:|---:|
-| Metal Add-One | `metal_elements_per_s` | 2997215949.69 elements/s | -1194572976.95 |
-| Metal QKV Projection | `metal_projection_passes_per_s` | 1965.80 projection/s | +283.43 |
-| Metal Logits Projection | `metal_projection_passes_per_s` | 183.59 projection/s | n/a |
+| Metal Add-One | `metal_elements_per_s` | 3008826398.85 elements/s | +11610449.16 |
+| Metal QKV Projection | `metal_projection_passes_per_s` | 2262.96 projection/s | +297.16 |
+| Metal Logits Projection | `metal_projection_passes_per_s` | 187.30 projection/s | +3.7137 |
 
 ## Best So Far
 
 | Suite | Best | Commit | Time | Label |
 |---|---:|---|---|---|
 | Metal Add-One | 4642798317.47 elements/s | `2bed129` | `2026-04-21T15:07:06.488718+00:00` | r006 |
-| Metal QKV Projection | 1965.80 projection/s | `a074a09` | `2026-04-21T15:34:50.306930+00:00` | r010 |
-| Metal Logits Projection | 183.59 projection/s | `a074a09` | `2026-04-21T15:34:50.306930+00:00` | r010 |
+| Metal QKV Projection | 2262.96 projection/s | `4c0566e` | `2026-04-21T15:39:43.916627+00:00` | r011 |
+| Metal Logits Projection | 187.30 projection/s | `4c0566e` | `2026-04-21T15:39:43.916627+00:00` | r011 |
 | Logits Head Matvec | 15.475 matvec/s | `573105b` | `2026-04-21T14:38:48.472187+00:00` | r003 |
 | Block 0 QKV Projection | 138.39 projection/s | `573105b` | `2026-04-21T14:38:48.472187+00:00` | r003 |
 | Fresh Full Token Pass | 0.64510 tok/s | `c4e45fa` | `2026-04-21T14:41:57.327290+00:00` | r005 |
@@ -36,6 +36,7 @@ This file is generated from `experiments/results.csv`.
 
 | Run | Commit | Label | Metal elems/s | Metal qkv/s | Metal logits/s | Cached tok/s | Fresh tok/s | QKV proj/s | Logits matvec/s |
 |---|---|---|---:|---:|---:|---:|---:|---:|---:|
+| `20260421T153943.916627Z-4c0566e-metal` | `4c0566e` | r011 | 3008826398.85 | 2262.96 | 187.30 |  |  |  |  |
 | `20260421T153450.306930Z-a074a09-metal` | `a074a09` | r010 | 2997215949.69 | 1965.80 | 183.59 |  |  |  |  |
 | `20260421T153351.012228Z-1d19296-metal` | `1d19296` | r009 | 4191788926.64 | 1682.37 |  |  |  |  |  |
 | `20260421T153148.630891Z-41d964b-metal` | `41d964b` | r008 | 2528517000.24 | 1612.77 |  |  |  |  |  |
@@ -45,4 +46,3 @@ This file is generated from `experiments/results.csv`.
 | `20260421T144028.003287Z-f8c07b8-decode` | `f8c07b8` | r004 |  |  |  | 0.54272 | 0.57953 |  |  |
 | `20260421T143848.472187Z-573105b-full` | `573105b` | r003 |  |  |  | 0.48605 | 0.51409 | 138.39 | 15.475 |
 | `20260421T142203.570145Z-333098c-decode` | `333098c` | r002 |  |  |  | 0.33362 | 0.42725 |  |  |
-| `20260421T142012.280840Z-d17380f-decode` | `d17380f` | r001 |  |  |  | 0.40690 | 0.43082 |  |  |
