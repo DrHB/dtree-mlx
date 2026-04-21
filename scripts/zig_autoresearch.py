@@ -43,6 +43,7 @@ class SuiteSpec:
     bench_iters: int | None = None
     bench_warmup: int | None = None
     decode_steps: int | None = None
+    repetitions: int = 1
 
 
 SUITE_ORDER = [
@@ -161,6 +162,7 @@ def build_suite_specs(model: str, token_id: int, profile: str) -> list[SuiteSpec
                     bench_rows=1048576,
                     bench_iters=20,
                     bench_warmup=5,
+                    repetitions=3,
                 ),
             ),
             (
@@ -188,6 +190,7 @@ def build_suite_specs(model: str, token_id: int, profile: str) -> list[SuiteSpec
                     bench_rows=8192,
                     bench_iters=20,
                     bench_warmup=5,
+                    repetitions=3,
                 ),
             ),
             (
@@ -215,6 +218,7 @@ def build_suite_specs(model: str, token_id: int, profile: str) -> list[SuiteSpec
                     bench_rows=248320,
                     bench_iters=10,
                     bench_warmup=3,
+                    repetitions=3,
                 ),
             ),
             (
@@ -376,12 +380,16 @@ def main(argv: list[str] | None = None) -> None:
     run_rows: list[dict[str, Any]] = []
     artifact_steps: list[dict[str, Any]] = []
     for spec in specs:
-        completed = run_checked(spec.command, step_name=spec.name)
-        metrics = parse_key_value_output(completed.stdout)
-        if spec.metric_key not in metrics:
-            raise SystemExit(
-                f"{spec.name} did not emit {spec.metric_key}. stdout was:\n{completed.stdout}"
-            )
+        attempts: list[tuple[subprocess.CompletedProcess[str], dict[str, Any]]] = []
+        for _ in range(spec.repetitions):
+            completed = run_checked(spec.command, step_name=spec.name)
+            metrics = parse_key_value_output(completed.stdout)
+            if spec.metric_key not in metrics:
+                raise SystemExit(
+                    f"{spec.name} did not emit {spec.metric_key}. stdout was:\n{completed.stdout}"
+                )
+            attempts.append((completed, metrics))
+        selected_index, completed, metrics = choose_median_attempt(attempts, spec.metric_key)
         row = {
             "timestamp_utc": timestamp,
             "run_id": run_id,
@@ -402,6 +410,7 @@ def main(argv: list[str] | None = None) -> None:
             "bench_iters": spec.bench_iters,
             "bench_warmup": spec.bench_warmup,
             "decode_steps": spec.decode_steps,
+            "bench_repetitions": spec.repetitions,
             "command": spec.command,
             "metrics_json": metrics,
             "git_branch": meta["git_branch"],
@@ -424,9 +433,20 @@ def main(argv: list[str] | None = None) -> None:
                 "stderr": completed.stderr,
                 "returncode": completed.returncode,
                 "metrics": metrics,
+                "selected_attempt_index": selected_index,
+                "attempts": [
+                    {
+                        "stdout": attempt_completed.stdout,
+                        "stderr": attempt_completed.stderr,
+                        "returncode": attempt_completed.returncode,
+                        "metrics": attempt_metrics,
+                    }
+                    for attempt_completed, attempt_metrics in attempts
+                ],
             }
         )
-        print(f"{spec.name}: {format_metric(row['metric_value'])} {spec.unit}")
+        repeat_note = f" median-of-{spec.repetitions}" if spec.repetitions > 1 else ""
+        print(f"{spec.name}: {format_metric(row['metric_value'])} {spec.unit}{repeat_note}")
 
     append_rows(args.results_csv, run_rows)
     write_run_artifact(
@@ -474,6 +494,18 @@ def run_checked(command: list[str], step_name: str) -> subprocess.CompletedProce
             f"stderr:\n{completed.stderr}"
         )
     return completed
+
+
+def choose_median_attempt(
+    attempts: list[tuple[subprocess.CompletedProcess[str], dict[str, Any]]],
+    metric_key: str,
+) -> tuple[int, subprocess.CompletedProcess[str], dict[str, Any]]:
+    ordered = sorted(
+        enumerate(attempts),
+        key=lambda item: float(item[1][1][metric_key]),
+    )
+    selected_index, (completed, metrics) = ordered[len(ordered) // 2]
+    return selected_index, completed, metrics
 
 
 def zig_build_command(optimize: str) -> list[str]:
