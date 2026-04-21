@@ -19,6 +19,7 @@ from typing import Any, Iterable
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_MODEL = "models/qwen3.6-35b-a3b-q4km/Qwen-Qwen3.6-35B-A3B-Q4_K_M.gguf"
+DEFAULT_OPTIMIZE = "ReleaseFast"
 EXPERIMENTS_DIR = REPO_ROOT / "experiments"
 RESULTS_CSV = EXPERIMENTS_DIR / "results.csv"
 SUMMARY_MD = EXPERIMENTS_DIR / "summary.md"
@@ -89,6 +90,12 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "--skip-build",
         action="store_true",
         help="Reuse the existing zig binary instead of running `zig build` first.",
+    )
+    parser.add_argument(
+        "--optimize",
+        choices=["Debug", "ReleaseSafe", "ReleaseFast", "ReleaseSmall"],
+        default=DEFAULT_OPTIMIZE,
+        help="Zig optimize mode used when building the benchmark binary.",
     )
     parser.add_argument(
         "--reports-only",
@@ -267,12 +274,16 @@ def main(argv: list[str] | None = None) -> None:
         "label": label,
         "notes": args.notes.strip(),
         "round_id": args.round_id.strip(),
+        "build_optimize": args.optimize,
     }
     timestamp = meta["timestamp_utc"]
     run_id = make_run_id(timestamp, meta["git_short_commit"], args.profile, meta["git_dirty"])
 
     if not args.skip_build:
-        run_checked(["zig", "build"], step_name="zig build")
+        run_checked(
+            zig_build_command(args.optimize),
+            step_name=f"zig build ({args.optimize})",
+        )
     elif not ZIG_BINARY.exists():
         raise SystemExit(f"--skip-build was used but {ZIG_BINARY} does not exist.")
 
@@ -312,6 +323,7 @@ def main(argv: list[str] | None = None) -> None:
             "git_short_commit": meta["git_short_commit"],
             "git_dirty": meta["git_dirty"],
             "git_subject": meta["git_subject"],
+            "build_optimize": args.optimize,
         }
         run_rows.append(row)
         artifact_steps.append(
@@ -342,6 +354,7 @@ def main(argv: list[str] | None = None) -> None:
             "notes": args.notes.strip(),
             "model": args.model,
             "token_id": args.token_id,
+            "build_optimize": args.optimize,
             "metadata": meta,
             "steps": artifact_steps,
         },
@@ -372,6 +385,20 @@ def run_checked(command: list[str], step_name: str) -> subprocess.CompletedProce
             f"stderr:\n{completed.stderr}"
         )
     return completed
+
+
+def zig_build_command(optimize: str) -> list[str]:
+    command = ["zig", "build"]
+    return command + zig_release_flag(optimize)
+
+
+def zig_release_flag(optimize: str) -> list[str]:
+    return {
+        "Debug": [],
+        "ReleaseSafe": ["--release=safe"],
+        "ReleaseFast": ["--release=fast"],
+        "ReleaseSmall": ["--release=small"],
+    }[optimize]
 
 
 def run_metadata(script_name: str, experiment_tag: str | None = None) -> dict[str, Any]:

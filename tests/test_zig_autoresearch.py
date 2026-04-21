@@ -62,6 +62,13 @@ def test_build_suite_specs_respects_profiles():
     ]
 
 
+def test_zig_build_command_uses_release_flags():
+    assert MODULE.zig_build_command("Debug") == ["zig", "build"]
+    assert MODULE.zig_build_command("ReleaseFast") == ["zig", "build", "--release=fast"]
+    assert MODULE.zig_build_command("ReleaseSafe") == ["zig", "build", "--release=safe"]
+    assert MODULE.zig_build_command("ReleaseSmall") == ["zig", "build", "--release=small"]
+
+
 def test_render_summary_and_svg_include_latest_metrics():
     rows = [
         {

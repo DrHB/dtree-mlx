@@ -49,13 +49,13 @@ Download the default model:
 Build the pure-Zig binary:
 
 ```bash
-zig build
+zig build --release=fast
 ```
 
 Run the current full-token baseline:
 
 ```bash
-zig build run -- \
+zig build run --release=fast -- \
   --model models/qwen3.6-35b-a3b-q4km/Qwen-Qwen3.6-35B-A3B-Q4_K_M.gguf \
   --full-token-pass \
   --token-id 42 \
@@ -67,7 +67,7 @@ zig build run -- \
 Run the current cached decode baseline:
 
 ```bash
-zig build run -- \
+zig build run --release=fast -- \
   --model models/qwen3.6-35b-a3b-q4km/Qwen-Qwen3.6-35B-A3B-Q4_K_M.gguf \
   --cached-decode \
   --token-id 42 \
@@ -98,7 +98,7 @@ This branch uses a small autoresearch-style loop around the Zig binary.
 Canonical tracked round:
 
 ```bash
-python3 scripts/zig_round.py --round-id r001 --notes "baseline before simd"
+python3 scripts/zig_round.py --round-id r001 --profile micro --notes "baseline before simd"
 ```
 
 That command:

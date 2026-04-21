@@ -30,6 +30,11 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--profile", choices=["full", "decode", "micro"], default="full")
     parser.add_argument("--model", default="models/qwen3.6-35b-a3b-q4km/Qwen-Qwen3.6-35B-A3B-Q4_K_M.gguf")
     parser.add_argument("--token-id", type=int, default=42)
+    parser.add_argument(
+        "--optimize",
+        choices=["Debug", "ReleaseSafe", "ReleaseFast", "ReleaseSmall"],
+        default="ReleaseFast",
+    )
     parser.add_argument("--code-message", default="", help="Commit message for the code change.")
     parser.add_argument("--results-message", default="", help="Commit message for the benchmark artifacts.")
     parser.add_argument("--remote", default="origin")
@@ -93,6 +98,8 @@ def main(argv: list[str] | None = None) -> None:
         args.model,
         "--token-id",
         str(args.token_id),
+        "--optimize",
+        args.optimize,
     ]
     if args.skip_build:
         autoresearch_cmd.append("--skip-build")
