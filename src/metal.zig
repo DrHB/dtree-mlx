@@ -1,26 +1,84 @@
 const std = @import("std");
 const metal = @import("metal/runtime.zig");
 
+const Args = struct {
+    bench: bool = false,
+    bench_iters: usize = 20,
+    bench_warmup: usize = 5,
+    elements: usize = 1 << 20,
+};
+
 pub fn main(init: std.process.Init) !void {
     const allocator = init.arena.allocator();
-    const report = try metal.runBootstrap(allocator);
-    defer {
-        var owned = report;
-        owned.deinit(allocator);
-    }
-
     var stdout_buffer: [4096]u8 = undefined;
     var stdout = std.Io.File.stdout().writer(init.io, &stdout_buffer);
 
-    try stdout.interface.writeAll("metal bootstrap ok\n");
-    try stdout.interface.print("device: {s}\n", .{report.device_name});
-    try stdout.interface.print("thread_execution_width: {d}\n", .{report.thread_execution_width});
-    try stdout.interface.print("max_threads_per_threadgroup: {d}\n", .{report.max_total_threads_per_threadgroup});
-    try stdout.interface.writeAll("input: ");
-    try printSlice(&stdout.interface, report.input[0..]);
-    try stdout.interface.writeAll("output: ");
-    try printSlice(&stdout.interface, report.output[0..]);
+    var arg_it = try init.minimal.args.iterateAllocator(allocator);
+    defer arg_it.deinit();
+    const args = try parseArgs(&arg_it);
+
+    if (args.bench) {
+        const result = try metal.runBenchmark(allocator, args.elements, args.bench_warmup, args.bench_iters);
+        defer {
+            var owned = result;
+            owned.deinit(allocator);
+        }
+        try stdout.interface.writeAll("Metal add-one benchmark\n");
+        try stdout.interface.print("device: {s}\n", .{result.device_name});
+        try stdout.interface.print("thread_execution_width: {d}\n", .{result.thread_execution_width});
+        try stdout.interface.print("max_threads_per_threadgroup: {d}\n", .{result.max_total_threads_per_threadgroup});
+        try stdout.interface.print("elements: {d}\n", .{result.elements});
+        try stdout.interface.print("bench_warmup: {d}\n", .{result.bench_warmup});
+        try stdout.interface.print("bench_iters: {d}\n", .{result.bench_iters});
+        try stdout.interface.print("elapsed_s: {d}\n", .{result.elapsed_s});
+        try stdout.interface.print("metal_dispatches_per_s: {d}\n", .{result.dispatches_per_s});
+        try stdout.interface.print("metal_elements_per_s: {d}\n", .{result.elements_per_s});
+        try stdout.interface.print("checksum: {d}\n", .{result.checksum});
+        try stdout.interface.writeAll("note: this is the first native Zig Metal benchmark, still far from a real inference kernel.\n");
+    } else {
+        const report = try metal.runBootstrap(allocator);
+        defer {
+            var owned = report;
+            owned.deinit(allocator);
+        }
+
+        try stdout.interface.writeAll("metal bootstrap ok\n");
+        try stdout.interface.print("device: {s}\n", .{report.device_name});
+        try stdout.interface.print("thread_execution_width: {d}\n", .{report.thread_execution_width});
+        try stdout.interface.print("max_threads_per_threadgroup: {d}\n", .{report.max_total_threads_per_threadgroup});
+        try stdout.interface.writeAll("input: ");
+        try printSlice(&stdout.interface, report.input[0..]);
+        try stdout.interface.writeAll("output: ");
+        try printSlice(&stdout.interface, report.output[0..]);
+    }
+
     try stdout.interface.flush();
+}
+
+fn parseArgs(arg_it: *std.process.Args.Iterator) !Args {
+    var out = Args{};
+
+    _ = arg_it.next();
+    while (arg_it.next()) |arg| {
+        if (std.mem.eql(u8, arg, "--help") or std.mem.eql(u8, arg, "-h")) {
+            printUsage();
+            std.process.exit(0);
+        } else if (std.mem.eql(u8, arg, "--bench")) {
+            out.bench = true;
+        } else if (std.mem.eql(u8, arg, "--bench-iters")) {
+            out.bench_iters = try std.fmt.parseInt(usize, arg_it.next() orelse return error.MissingValue, 10);
+        } else if (std.mem.eql(u8, arg, "--bench-warmup")) {
+            out.bench_warmup = try std.fmt.parseInt(usize, arg_it.next() orelse return error.MissingValue, 10);
+        } else if (std.mem.eql(u8, arg, "--elements")) {
+            out.elements = try std.fmt.parseInt(usize, arg_it.next() orelse return error.MissingValue, 10);
+        } else {
+            std.debug.print("unknown argument: {s}\n", .{arg});
+            printUsage();
+            return error.UnknownArgument;
+        }
+    }
+
+    return out;
 }
 
 fn printSlice(writer: *std.Io.Writer, values: []const f32) !void {
@@ -30,4 +88,18 @@ fn printSlice(writer: *std.Io.Writer, values: []const f32) !void {
         try writer.print("{d:.3}", .{value});
     }
     try writer.writeAll("]\n");
+}
+
+fn printUsage() void {
+    std.debug.print(
+        \\Usage: dtree-mlx-metal-bootstrap [options]
+        \\
+        \\Options:
+        \\  --bench              Run the native Metal add-one benchmark.
+        \\  --bench-iters N      Timed benchmark dispatches. Default: 20
+        \\  --bench-warmup N     Warmup dispatches. Default: 5
+        \\  --elements N         Number of f32 elements processed per dispatch. Default: 1048576
+        \\  --help               Print this help text.
+        \\
+    , .{});
 }

@@ -43,7 +43,7 @@ Everything performance-critical must stay native.
 Canonical tracked round:
 
 ```bash
-python3 scripts/zig_round.py --round-id r001 --notes "describe the change"
+python3 scripts/zig_round.py --round-id r001 --profile metal --notes "describe the Metal change"
 ```
 
 This round runner does the mechanical bookkeeping:
@@ -64,6 +64,7 @@ Faster benchmark slices:
 ```bash
 python3 scripts/zig_autoresearch.py --profile decode --notes "decode-only check"
 python3 scripts/zig_autoresearch.py --profile micro --notes "kernel-only check"
+python3 scripts/zig_autoresearch.py --profile metal --notes "Metal-only check"
 ```
 
 Artifacts:
@@ -109,18 +110,18 @@ These numbers are still far from the earlier bootstrap reference of about
 runtime. That gap is large enough that CPU-only tuning is not expected to close
 it.
 
-## Two-Track Strategy
+## Current Direction
 
-Run two optimization tracks in parallel:
+CPU optimization is no longer the active track.
 
-1. CPU track:
-   keep improving `cached_decode` and `full_token_pass` with tracked rounds.
-2. Metal track:
-   start and iterate on a pure-native Zig Metal backend for macOS.
+The branch should now focus on:
+
+1. pure-native Zig Metal bring-up on macOS
+2. Metal benchmarking through the existing experiment loop
+3. inference-relevant Metal kernels
 
 Guidance:
 
-- CPU rounds should keep using `scripts/zig_round.py`.
-- Small CPU wins are still worth taking when they move `cached_decode`.
-- The path to tens of tok/s is expected to require the Metal track, not just
-  more CPU threading.
+- Do not spend new rounds on CPU-only tuning.
+- Keep the CPU path as a correctness/reference path only.
+- The path to tens of tok/s is expected to come from the Metal track.

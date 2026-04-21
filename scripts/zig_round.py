@@ -27,7 +27,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     )
     parser.add_argument("--round-id", required=True, help="Round identifier, for example r001.")
     parser.add_argument("--notes", required=True, help="Short note describing the experiment.")
-    parser.add_argument("--profile", choices=["full", "decode", "micro"], default="full")
+    parser.add_argument("--profile", choices=["full", "decode", "micro", "metal"], default="full")
     parser.add_argument("--model", default="models/qwen3.6-35b-a3b-q4km/Qwen-Qwen3.6-35B-A3B-Q4_K_M.gguf")
     parser.add_argument("--token-id", type=int, default=42)
     parser.add_argument(

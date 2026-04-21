@@ -110,7 +110,7 @@ This branch uses a small autoresearch-style loop around the Zig binary.
 Canonical tracked round:
 
 ```bash
-python3 scripts/zig_round.py --round-id r001 --profile micro --notes "baseline before simd"
+python3 scripts/zig_round.py --round-id r001 --profile metal --notes "baseline before first Metal kernel"
 ```
 
 That command:
@@ -131,6 +131,7 @@ Faster slices:
 ```bash
 python3 scripts/zig_autoresearch.py --profile decode --notes "decode-only check"
 python3 scripts/zig_autoresearch.py --profile micro --notes "kernel-only check"
+python3 scripts/zig_autoresearch.py --profile metal --notes "Metal-only check"
 ```
 
 Regenerate the markdown summary and SVG plot from the CSV:

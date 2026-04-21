@@ -40,6 +40,23 @@ pub const Report = struct {
     }
 };
 
+pub const BenchmarkResult = struct {
+    device_name: []u8,
+    thread_execution_width: usize,
+    max_total_threads_per_threadgroup: usize,
+    elements: usize,
+    bench_iters: usize,
+    bench_warmup: usize,
+    elapsed_s: f64,
+    dispatches_per_s: f64,
+    elements_per_s: f64,
+    checksum: f64,
+
+    pub fn deinit(self: *BenchmarkResult, allocator: std.mem.Allocator) void {
+        allocator.free(self.device_name);
+    }
+};
+
 pub const Error = std.DynLib.Error || error{
     MissingSymbol,
     UnsupportedPlatform,
@@ -54,6 +71,10 @@ pub const Error = std.DynLib.Error || error{
     BufferCreationFailed,
     BufferMapFailed,
     ValidationFailed,
+    InvalidBenchIters,
+    InvalidElementCount,
+    ClockGetTimeFailed,
+    ClockOutOfRange,
 };
 
 const Symbols = struct {
@@ -76,24 +97,137 @@ const Symbols = struct {
     msg_send_usize_0: *const fn (Id, Sel) callconv(.c) usize,
 };
 
+const Session = struct {
+    libobjc: std.DynLib,
+    foundation: std.DynLib,
+    metal: std.DynLib,
+    symbols: Symbols,
+    device: Id,
+    queue: Id,
+    library: Id,
+    function: Id,
+    pipeline: Id,
+    thread_execution_width: usize,
+    max_total_threads_per_threadgroup: usize,
+
+    fn deinit(self: *Session) void {
+        release(&self.symbols, self.pipeline);
+        release(&self.symbols, self.function);
+        release(&self.symbols, self.library);
+        release(&self.symbols, self.queue);
+        release(&self.symbols, self.device);
+        self.metal.close();
+        self.foundation.close();
+        self.libobjc.close();
+    }
+};
+
 pub fn runBootstrap(allocator: std.mem.Allocator) Error!Report {
     if (builtin.os.tag != .macos) return error.UnsupportedPlatform;
 
+    var session = try createSession();
+    defer session.deinit();
+
+    const buffer = try allocateSharedBuffer(&session, DemoValues.len);
+    defer release(&session.symbols, buffer.object);
+    @memcpy(buffer.floats[0..DemoValues.len], DemoValues[0..]);
+
+    try dispatchAddOne(&session, buffer.object, DemoValues.len);
+
+    var output: [DemoValues.len]f32 = undefined;
+    @memcpy(output[0..], buffer.floats[0..DemoValues.len]);
+    for (output, 0..) |value, idx| {
+        const expected = DemoValues[idx] + 1.0;
+        if (@abs(value - expected) > 0.0001) return error.ValidationFailed;
+    }
+
+    return .{
+        .device_name = try copyNSString(
+            allocator,
+            &session.symbols,
+            session.symbols.msg_send_id_0(session.device, sel(&session.symbols, "name")) orelse return error.StringCreationFailed,
+        ),
+        .thread_execution_width = session.thread_execution_width,
+        .max_total_threads_per_threadgroup = session.max_total_threads_per_threadgroup,
+        .input = DemoValues,
+        .output = output,
+    };
+}
+
+pub fn runBenchmark(
+    allocator: std.mem.Allocator,
+    element_count: usize,
+    bench_warmup: usize,
+    bench_iters: usize,
+) Error!BenchmarkResult {
+    if (builtin.os.tag != .macos) return error.UnsupportedPlatform;
+    if (element_count == 0) return error.InvalidElementCount;
+    if (bench_iters == 0) return error.InvalidBenchIters;
+
+    var session = try createSession();
+    defer session.deinit();
+
+    const buffer = try allocateSharedBuffer(&session, element_count);
+    defer release(&session.symbols, buffer.object);
+    fillPattern(buffer.floats, element_count);
+
+    for (0..bench_warmup) |_| {
+        try dispatchAddOne(&session, buffer.object, element_count);
+    }
+
+    const start_ns = try monotonicNowNs();
+    for (0..bench_iters) |_| {
+        try dispatchAddOne(&session, buffer.object, element_count);
+    }
+    const end_ns = try monotonicNowNs();
+    const elapsed_s = @as(f64, @floatFromInt(end_ns - start_ns)) / @as(f64, std.time.ns_per_s);
+
+    const expected_add = @as(f32, @floatFromInt(bench_warmup + bench_iters));
+    var checksum: f64 = 0;
+    for (0..element_count) |idx| {
+        const expected = initialValue(idx) + expected_add;
+        const actual = buffer.floats[idx];
+        if (@abs(actual - expected) > 0.0001) return error.ValidationFailed;
+        checksum += actual;
+    }
+
+    return .{
+        .device_name = try copyNSString(
+            allocator,
+            &session.symbols,
+            session.symbols.msg_send_id_0(session.device, sel(&session.symbols, "name")) orelse return error.StringCreationFailed,
+        ),
+        .thread_execution_width = session.thread_execution_width,
+        .max_total_threads_per_threadgroup = session.max_total_threads_per_threadgroup,
+        .elements = element_count,
+        .bench_iters = bench_iters,
+        .bench_warmup = bench_warmup,
+        .elapsed_s = elapsed_s,
+        .dispatches_per_s = @as(f64, @floatFromInt(bench_iters)) / elapsed_s,
+        .elements_per_s = (@as(f64, @floatFromInt(element_count)) * @as(f64, @floatFromInt(bench_iters))) / elapsed_s,
+        .checksum = checksum,
+    };
+}
+
+const SharedBuffer = struct {
+    object: Id,
+    floats: [*]f32,
+};
+
+fn createSession() Error!Session {
     var libobjc = try std.DynLib.open(libobjc_path);
-    defer libobjc.close();
+    errdefer libobjc.close();
     var foundation = try std.DynLib.open(foundation_path);
-    defer foundation.close();
+    errdefer foundation.close();
     var metal = try std.DynLib.open(metal_path);
-    defer metal.close();
-    _ = &foundation;
+    errdefer metal.close();
 
     const symbols = try loadSymbols(&libobjc, &metal);
-
     const device = symbols.create_default_device() orelse return error.NoMetalDevice;
-    defer release(&symbols, device);
+    errdefer release(&symbols, device);
 
     const queue = symbols.msg_send_id_0(device, sel(&symbols, "newCommandQueue")) orelse return error.CommandQueueCreationFailed;
-    defer release(&symbols, queue);
+    errdefer release(&symbols, queue);
 
     const source = try nsString(&symbols, MetalSource);
     const function_name = try nsString(&symbols, "add_one");
@@ -106,92 +240,102 @@ pub fn runBootstrap(allocator: std.mem.Allocator) Error!Report {
         null,
         &compile_error,
     ) orelse {
-        if (compile_error) |err| {
-            defer release(&symbols, err);
-            try printNSError(err);
-        }
+        if (compile_error) |err| try printNSError(err);
         return error.ShaderCompilationFailed;
     };
-    defer release(&symbols, library);
-    if (compile_error) |_| {}
-
-    const function = symbols.msg_send_id_id(library, sel(&symbols, "newFunctionWithName:"), function_name) orelse return error.FunctionLookupFailed;
-    defer release(&symbols, function);
+    errdefer release(&symbols, library);
 
     var pipeline_error: Id = null;
+    const function = symbols.msg_send_id_id(library, sel(&symbols, "newFunctionWithName:"), function_name) orelse return error.FunctionLookupFailed;
+    errdefer release(&symbols, function);
+
     const pipeline = symbols.msg_send_id_id_ptrid(
         device,
         sel(&symbols, "newComputePipelineStateWithFunction:error:"),
         function,
         &pipeline_error,
     ) orelse {
-        if (pipeline_error) |err| {
-            defer release(&symbols, err);
-            try printNSError(err);
-        }
+        if (pipeline_error) |err| try printNSError(err);
         return error.PipelineCreationFailed;
     };
-    defer release(&symbols, pipeline);
-    if (pipeline_error) |_| {}
+    errdefer release(&symbols, pipeline);
 
-    const byte_len = DemoValues.len * @sizeOf(f32);
-    const buffer = symbols.msg_send_id_usize_usize(
-        device,
-        sel(&symbols, "newBufferWithLength:options:"),
+    return .{
+        .libobjc = libobjc,
+        .foundation = foundation,
+        .metal = metal,
+        .symbols = symbols,
+        .device = device,
+        .queue = queue,
+        .library = library,
+        .function = function,
+        .pipeline = pipeline,
+        .thread_execution_width = symbols.msg_send_usize_0(pipeline, sel(&symbols, "threadExecutionWidth")),
+        .max_total_threads_per_threadgroup = symbols.msg_send_usize_0(pipeline, sel(&symbols, "maxTotalThreadsPerThreadgroup")),
+    };
+}
+
+fn allocateSharedBuffer(session: *Session, element_count: usize) Error!SharedBuffer {
+    const byte_len = element_count * @sizeOf(f32);
+    const buffer = session.symbols.msg_send_id_usize_usize(
+        session.device,
+        sel(&session.symbols, "newBufferWithLength:options:"),
         byte_len,
         MTLResourceStorageModeShared,
     ) orelse return error.BufferCreationFailed;
-    defer release(&symbols, buffer);
-
-    const raw_contents = symbols.msg_send_ptr_0(buffer, sel(&symbols, "contents")) orelse return error.BufferMapFailed;
-    const floats: [*]f32 = @ptrCast(@alignCast(raw_contents));
-    @memcpy(floats[0..DemoValues.len], DemoValues[0..]);
-
-    const command_buffer = symbols.msg_send_id_0(queue, sel(&symbols, "commandBuffer")) orelse return error.CommandBufferCreationFailed;
-
-    const encoder = symbols.msg_send_id_0(command_buffer, sel(&symbols, "computeCommandEncoder")) orelse return error.ComputeEncoderCreationFailed;
-
-    symbols.msg_send_void_id(encoder, sel(&symbols, "setComputePipelineState:"), pipeline);
-    symbols.msg_send_void_id_usize_usize(encoder, sel(&symbols, "setBuffer:offset:atIndex:"), buffer, 0, 0);
-
-    const threads_per_group = MTLSize{
-        .width = DemoValues.len,
-        .height = 1,
-        .depth = 1,
-    };
-    const threadgroups = MTLSize{
-        .width = 1,
-        .height = 1,
-        .depth = 1,
-    };
-    symbols.msg_send_void_size_size(
-        encoder,
-        sel(&symbols, "dispatchThreadgroups:threadsPerThreadgroup:"),
-        threadgroups,
-        threads_per_group,
-    );
-    symbols.msg_send_void_0(encoder, sel(&symbols, "endEncoding"));
-    symbols.msg_send_void_0(command_buffer, sel(&symbols, "commit"));
-    symbols.msg_send_void_0(command_buffer, sel(&symbols, "waitUntilCompleted"));
-
-    var output: [DemoValues.len]f32 = undefined;
-    @memcpy(output[0..], floats[0..DemoValues.len]);
-    for (output, 0..) |value, idx| {
-        const expected = DemoValues[idx] + 1.0;
-        if (@abs(value - expected) > 0.0001) return error.ValidationFailed;
-    }
-
-    const device_name = try copyNSString(allocator, &symbols, symbols.msg_send_id_0(device, sel(&symbols, "name")) orelse return error.StringCreationFailed);
-    const thread_execution_width = symbols.msg_send_usize_0(pipeline, sel(&symbols, "threadExecutionWidth"));
-    const max_total_threads = symbols.msg_send_usize_0(pipeline, sel(&symbols, "maxTotalThreadsPerThreadgroup"));
-
+    const raw_contents = session.symbols.msg_send_ptr_0(buffer, sel(&session.symbols, "contents")) orelse return error.BufferMapFailed;
     return .{
-        .device_name = device_name,
-        .thread_execution_width = thread_execution_width,
-        .max_total_threads_per_threadgroup = max_total_threads,
-        .input = DemoValues,
-        .output = output,
+        .object = buffer,
+        .floats = @ptrCast(@alignCast(raw_contents)),
     };
+}
+
+fn dispatchAddOne(session: *Session, buffer: Id, element_count: usize) Error!void {
+    const command_buffer = session.symbols.msg_send_id_0(session.queue, sel(&session.symbols, "commandBuffer")) orelse return error.CommandBufferCreationFailed;
+    const encoder = session.symbols.msg_send_id_0(command_buffer, sel(&session.symbols, "computeCommandEncoder")) orelse return error.ComputeEncoderCreationFailed;
+
+    session.symbols.msg_send_void_id(encoder, sel(&session.symbols, "setComputePipelineState:"), session.pipeline);
+    session.symbols.msg_send_void_id_usize_usize(encoder, sel(&session.symbols, "setBuffer:offset:atIndex:"), buffer, 0, 0);
+
+    const threads_per_group_width = chooseThreadgroupWidth(
+        session.thread_execution_width,
+        session.max_total_threads_per_threadgroup,
+        element_count,
+    );
+    session.symbols.msg_send_void_size_size(
+        encoder,
+        sel(&session.symbols, "dispatchThreads:threadsPerThreadgroup:"),
+        .{
+            .width = element_count,
+            .height = 1,
+            .depth = 1,
+        },
+        .{
+            .width = threads_per_group_width,
+            .height = 1,
+            .depth = 1,
+        },
+    );
+    session.symbols.msg_send_void_0(encoder, sel(&session.symbols, "endEncoding"));
+    session.symbols.msg_send_void_0(command_buffer, sel(&session.symbols, "commit"));
+    session.symbols.msg_send_void_0(command_buffer, sel(&session.symbols, "waitUntilCompleted"));
+}
+
+fn chooseThreadgroupWidth(thread_execution_width: usize, max_total_threads: usize, element_count: usize) usize {
+    const preferred = @min(@max(thread_execution_width * 8, thread_execution_width), max_total_threads);
+    const capped = @min(preferred, element_count);
+    const rounded = @max(thread_execution_width, (capped / thread_execution_width) * thread_execution_width);
+    return @min(rounded, element_count);
+}
+
+fn fillPattern(values: [*]f32, element_count: usize) void {
+    for (0..element_count) |idx| {
+        values[idx] = initialValue(idx);
+    }
+}
+
+fn initialValue(idx: usize) f32 {
+    return @as(f32, @floatFromInt(idx % 251));
 }
 
 fn loadSymbols(libobjc: *std.DynLib, metal: *std.DynLib) Error!Symbols {
@@ -253,4 +397,13 @@ fn printNSError(err: Id) Error!void {
     if (local_symbols.helper(err)) |message| {
         std.debug.print("metal error: {s}\n", .{std.mem.span(message)});
     }
+}
+
+fn monotonicNowNs() !u64 {
+    var ts: std.c.timespec = undefined;
+    if (std.c.clock_gettime(std.posix.CLOCK.MONOTONIC, &ts) != 0) {
+        return error.ClockGetTimeFailed;
+    }
+    const total_ns = @as(i128, ts.sec) * std.time.ns_per_s + @as(i128, ts.nsec);
+    return std.math.cast(u64, total_ns) orelse error.ClockOutOfRange;
 }
