@@ -26,6 +26,9 @@ RESULTS_CSV = EXPERIMENTS_DIR / "results.csv"
 SUMMARY_MD = EXPERIMENTS_DIR / "summary.md"
 PLOT_SVG = EXPERIMENTS_DIR / "results.svg"
 RUNS_DIR = EXPERIMENTS_DIR / "runs"
+TRACES_DIR = EXPERIMENTS_DIR / "traces"
+SHORT_TRACE = TRACES_DIR / "short.json"
+AUDIT_TRACE = TRACES_DIR / "audit.json"
 ZIG_BINARY = REPO_ROOT / "zig-out" / "bin" / "dtree-mlx-zig"
 METAL_BINARY = REPO_ROOT / "zig-out" / "bin" / "dtree-mlx-metal-bootstrap"
 ZIG_GLOBAL_CACHE_DIR = REPO_ROOT / ".zig-global-cache"
@@ -50,11 +53,18 @@ SUITE_ORDER = [
     "metal_add_one",
     "metal_qkv_projection",
     "metal_logits_projection",
+    "cached_decode_trace",
     "logits_matvec",
     "blk0_qkv_projection",
     "full_token_pass",
     "cached_decode",
 ]
+
+PROFILE_CHOICES = ["tracked", "full", "decode", "micro", "metal"]
+
+RUN_OUTCOME_ACCEPTED = "accepted"
+RUN_OUTCOME_REJECTED = "rejected"
+RUN_OUTCOME_UNREVIEWED = ""
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
@@ -68,7 +78,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     )
     parser.add_argument(
         "--profile",
-        choices=["full", "decode", "micro", "metal"],
+        choices=PROFILE_CHOICES,
         default="metal",
         help="Benchmark subset to run. full = micro + decode.",
     )
@@ -144,7 +154,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 def build_suite_specs(model: str, token_id: int, profile: str, metal_decode: bool = False) -> list[SuiteSpec]:
     binary = str(ZIG_BINARY)
     metal_binary = str(METAL_BINARY)
-    decode_backend_flags = ["--metal-decode"] if metal_decode else []
+    decode_backend_flags = ["--metal-decode"] if metal_decode or profile == "tracked" else []
     specs = OrderedDict(
         [
             (
@@ -225,6 +235,35 @@ def build_suite_specs(model: str, token_id: int, profile: str, metal_decode: boo
                     bench_iters=10,
                     bench_warmup=3,
                     repetitions=3,
+                ),
+            ),
+            (
+                "cached_decode_trace",
+                SuiteSpec(
+                    name="cached_decode_trace",
+                    title="Tracked Cached Decode",
+                    metric_key="steady_decode_tok_per_s",
+                    unit="tok/s",
+                    color="#4d96ff",
+                    command=[
+                        binary,
+                        "--model",
+                        model,
+                        "--cached-decode",
+                        "--bench",
+                        "--token-seq-file",
+                        str(SHORT_TRACE),
+                        "--prompt-tokens",
+                        "4",
+                        "--timed-tokens",
+                        "8",
+                        "--emit-backend-stats",
+                        "--parity-against",
+                        "cpu",
+                        *decode_backend_flags,
+                    ],
+                    bench_iters=1,
+                    bench_warmup=0,
                 ),
             ),
             (
@@ -344,11 +383,107 @@ def build_suite_specs(model: str, token_id: int, profile: str, metal_decode: boo
         names = ["logits_matvec", "blk0_qkv_projection"]
     elif profile == "decode":
         names = ["full_token_pass", "cached_decode"]
+    elif profile == "tracked":
+        names = [
+            "metal_add_one",
+            "metal_qkv_projection",
+            "metal_logits_projection",
+            "cached_decode_trace",
+        ]
     elif profile == "metal":
         names = ["metal_add_one", "metal_qkv_projection", "metal_logits_projection"]
     else:
         names = ["logits_matvec", "blk0_qkv_projection", "full_token_pass", "cached_decode"]
     return [specs[name] for name in names]
+
+
+def run_backend(profile: str, metal_decode: bool) -> str:
+    if profile == "tracked":
+        return "metal+metal-cache"
+    if profile == "metal":
+        return "metal"
+    if profile == "decode":
+        return "metal-cache" if metal_decode else "cpu"
+    if profile == "micro":
+        return "cpu"
+    return "mixed:cpu+metal-cache" if metal_decode else "cpu"
+
+
+def run_coverage(profile: str) -> str:
+    return {
+        "tracked": "metal-kernels+decode",
+        "full": "cpu-kernels+decode",
+        "decode": "decode",
+        "micro": "cpu-kernels",
+        "metal": "metal-kernels",
+    }[profile]
+
+
+def suite_backend(spec_name: str, metrics: dict[str, Any]) -> str:
+    backend = metrics.get("projection_backend")
+    if isinstance(backend, str) and backend:
+        return backend
+    if spec_name.startswith("metal_"):
+        return "metal"
+    return "cpu"
+
+
+def suite_coverage(spec_name: str) -> str:
+    return {
+        "metal_add_one": "metal-kernel",
+        "metal_qkv_projection": "metal-kernel",
+        "metal_logits_projection": "metal-kernel",
+        "cached_decode_trace": "tracked-decode",
+        "logits_matvec": "projection-kernel",
+        "blk0_qkv_projection": "projection-kernel",
+        "full_token_pass": "fresh-token",
+        "cached_decode": "cached-decode",
+    }[spec_name]
+
+
+def run_outcome_label(value: Any) -> str:
+    text = str(value or "").strip()
+    return text or "unreviewed"
+
+
+def row_run_backend(row: dict[str, Any]) -> str:
+    backend = str(row.get("run_backend", "") or "").strip()
+    if backend:
+        return backend
+    profile = str(row.get("profile", "") or "").strip()
+    if not profile:
+        return ""
+    decode_backend = str(row.get("decode_backend", "") or "").strip()
+    metrics = row.get("metrics_json")
+    if not decode_backend and isinstance(metrics, dict):
+        metric_backend = metrics.get("projection_backend")
+        if isinstance(metric_backend, str):
+            decode_backend = metric_backend
+    return run_backend(profile, decode_backend == "metal-cache")
+
+
+def row_run_coverage(row: dict[str, Any]) -> str:
+    coverage = str(row.get("run_coverage", "") or "").strip()
+    if coverage:
+        return coverage
+    profile = str(row.get("profile", "") or "").strip()
+    return run_coverage(profile) if profile in PROFILE_CHOICES else ""
+
+
+def row_suite_backend(row: dict[str, Any]) -> str:
+    backend = str(row.get("suite_backend", "") or "").strip()
+    if backend:
+        return backend
+    metrics = row.get("metrics_json")
+    return suite_backend(str(row.get("suite", "")), metrics if isinstance(metrics, dict) else {})
+
+
+def row_suite_coverage(row: dict[str, Any]) -> str:
+    coverage = str(row.get("suite_coverage", "") or "").strip()
+    if coverage:
+        return coverage
+    suite = str(row.get("suite", "") or "").strip()
+    return suite_coverage(suite) if suite in SUITE_ORDER else ""
 
 
 def main(argv: list[str] | None = None) -> None:
@@ -363,7 +498,8 @@ def main(argv: list[str] | None = None) -> None:
         print(f"updated reports from {args.results_csv}")
         return
 
-    specs = build_suite_specs(args.model, args.token_id, args.profile, args.metal_decode)
+    effective_metal_decode = args.metal_decode or args.profile == "tracked"
+    specs = build_suite_specs(args.model, args.token_id, args.profile, effective_metal_decode)
     git_meta = current_git_metadata()
     label = args.label.strip() or args.notes.strip() or git_meta["git_subject"]
     meta = {
@@ -373,7 +509,9 @@ def main(argv: list[str] | None = None) -> None:
         "notes": args.notes.strip(),
         "round_id": args.round_id.strip(),
         "build_optimize": args.optimize,
-        "decode_backend": "metal-cache" if args.metal_decode else "cpu",
+        "decode_backend": "metal-cache" if effective_metal_decode else "cpu",
+        "run_backend": run_backend(args.profile, effective_metal_decode),
+        "run_coverage": run_coverage(args.profile),
     }
     timestamp = meta["timestamp_utc"]
     run_id = make_run_id(timestamp, meta["git_short_commit"], args.profile, meta["git_dirty"])
@@ -428,6 +566,16 @@ def main(argv: list[str] | None = None) -> None:
             "git_dirty": meta["git_dirty"],
             "git_subject": meta["git_subject"],
             "build_optimize": args.optimize,
+            "decode_backend": meta["decode_backend"],
+            "run_backend": meta["run_backend"],
+            "run_coverage": meta["run_coverage"],
+            "suite_backend": suite_backend(spec.name, metrics),
+            "suite_coverage": suite_coverage(spec.name),
+            "run_outcome": RUN_OUTCOME_UNREVIEWED,
+            "gate_baseline_run_id": "",
+            "gate_max_regression_pct": "",
+            "gate_regressions_json": [],
+            "decision_trace": "",
         }
         run_rows.append(row)
         artifact_steps.append(
@@ -437,6 +585,8 @@ def main(argv: list[str] | None = None) -> None:
                 "metric_key": spec.metric_key,
                 "metric_value": row["metric_value"],
                 "metric_unit": spec.unit,
+                "suite_backend": row["suite_backend"],
+                "suite_coverage": row["suite_coverage"],
                 "command": spec.command,
                 "stdout": completed.stdout,
                 "stderr": completed.stderr,
@@ -458,8 +608,9 @@ def main(argv: list[str] | None = None) -> None:
         print(f"{spec.name}: {format_metric(row['metric_value'])} {spec.unit}{repeat_note}")
 
     append_rows(args.results_csv, run_rows)
+    run_artifact_path = args.runs_dir / f"{run_id}.json"
     write_run_artifact(
-        args.runs_dir / f"{run_id}.json",
+        run_artifact_path,
         {
             "run_id": run_id,
             "round_id": args.round_id.strip(),
@@ -470,12 +621,17 @@ def main(argv: list[str] | None = None) -> None:
             "model": args.model,
             "token_id": args.token_id,
             "build_optimize": args.optimize,
+            "run_backend": meta["run_backend"],
+            "run_coverage": meta["run_coverage"],
+            "run_outcome": RUN_OUTCOME_UNREVIEWED,
             "metadata": meta,
             "steps": artifact_steps,
         },
     )
     rebuild_reports(args.results_csv, args.summary_md, args.plot_svg)
 
+    print(f"run_id: {run_id}")
+    print(f"run_artifact: {run_artifact_path}")
     if args.round_id.strip():
         print(f"round_id: {args.round_id.strip()}")
     print(f"tracked_git_commit: {meta['git_commit']}")
@@ -551,19 +707,8 @@ def append_rows(path: Path, rows: Iterable[dict[str, Any]]) -> None:
     normalized_rows = [{key: normalize_value(value) for key, value in row.items()} for row in rows]
     path.parent.mkdir(parents=True, exist_ok=True)
 
-    existing_rows: list[dict[str, str]] = []
-    fieldnames: list[str] = []
-    if path.exists():
-        with path.open(newline="") as handle:
-            reader = csv.DictReader(handle)
-            fieldnames = list(reader.fieldnames or [])
-            existing_rows = list(reader)
-
-    merged_fields = list(fieldnames)
-    for row in normalized_rows:
-        for key in row:
-            if key not in merged_fields:
-                merged_fields.append(key)
+    fieldnames, existing_rows = load_text_rows(path)
+    merged_fields = merge_fieldnames(fieldnames, [*existing_rows, *normalized_rows])
 
     write_mode = "a" if path.exists() and merged_fields == fieldnames else "w"
     with path.open(write_mode, newline="") as handle:
@@ -577,6 +722,52 @@ def append_rows(path: Path, rows: Iterable[dict[str, Any]]) -> None:
 
         for row in normalized_rows:
             writer.writerow({key: row.get(key, "") for key in merged_fields})
+
+
+def update_run_rows(path: Path, run_id: str, updates: dict[str, Any]) -> int:
+    fieldnames, rows = load_text_rows(path)
+    if not rows:
+        return 0
+
+    normalized_updates = {key: normalize_value(value) for key, value in updates.items()}
+    updated = 0
+    for row in rows:
+        if row.get("run_id") != run_id:
+            continue
+        row.update(normalized_updates)
+        updated += 1
+    if updated == 0:
+        return 0
+
+    merged_fields = merge_fieldnames(fieldnames, [*rows, normalized_updates])
+    write_text_rows(path, merged_fields, rows)
+    return updated
+
+
+def load_text_rows(path: Path) -> tuple[list[str], list[dict[str, str]]]:
+    if not path.exists():
+        return [], []
+    with path.open(newline="") as handle:
+        reader = csv.DictReader(handle)
+        return list(reader.fieldnames or []), list(reader)
+
+
+def merge_fieldnames(fieldnames: Iterable[str], rows: Iterable[dict[str, Any]]) -> list[str]:
+    merged = list(fieldnames)
+    for row in rows:
+        for key in row:
+            if key not in merged:
+                merged.append(key)
+    return merged
+
+
+def write_text_rows(path: Path, fieldnames: list[str], rows: Iterable[dict[str, str]]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("w", newline="") as handle:
+        writer = csv.DictWriter(handle, fieldnames=fieldnames, lineterminator="\n")
+        writer.writeheader()
+        for row in rows:
+            writer.writerow({key: row.get(key, "") for key in fieldnames})
 
 
 def normalize_value(value: Any) -> str:
@@ -665,6 +856,15 @@ def write_run_artifact(path: Path, payload: dict[str, Any]) -> None:
     path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n")
 
 
+def update_run_artifact(path: Path, updates: dict[str, Any]) -> dict[str, Any]:
+    payload: dict[str, Any] = {}
+    if path.exists():
+        payload = json.loads(path.read_text())
+    payload.update(updates)
+    write_run_artifact(path, payload)
+    return payload
+
+
 def rebuild_reports(results_csv: Path, summary_md: Path, plot_svg: Path) -> None:
     rows = load_result_rows(results_csv)
     summary_md.parent.mkdir(parents=True, exist_ok=True)
@@ -720,6 +920,9 @@ def render_summary(rows: list[dict[str, Any]]) -> str:
         f"- Commit: `{latest['git_short_commit']}` on `{latest['git_branch']}`",
         f"- Dirty tree: `{latest['git_dirty']}`",
         f"- Subject: {latest['git_subject']}",
+        f"- Outcome: `{run_outcome_label(latest.get('run_outcome', ''))}`",
+        f"- Backend: `{latest.get('run_backend', '') or 'n/a'}`",
+        f"- Coverage: `{latest.get('run_coverage', '') or 'n/a'}`",
     ]
     if latest["label"]:
         lines.append(f"- Label: {latest['label']}")
@@ -731,8 +934,8 @@ def render_summary(rows: list[dict[str, Any]]) -> str:
             "",
             "## Latest Metrics",
             "",
-            "| Suite | Metric | Value | Delta vs previous same suite |",
-            "|---|---|---:|---:|",
+            "| Suite | Backend | Coverage | Metric | Value | Delta vs previous same suite |",
+            "|---|---|---|---|---:|---:|",
         ]
     )
     for suite_name in SUITE_ORDER:
@@ -745,8 +948,10 @@ def render_summary(rows: list[dict[str, Any]]) -> str:
             delta_value = float(row["metric_value"]) - float(previous["metric_value"])
             delta = signed_metric(delta_value)
         lines.append(
-            "| {suite} | `{metric}` | {value} {unit} | {delta} |".format(
+            "| {suite} | `{backend}` | `{coverage}` | `{metric}` | {value} {unit} | {delta} |".format(
                 suite=row["suite_title"],
+                backend=row_suite_backend(row),
+                coverage=row_suite_coverage(row),
                 metric=row["metric_key"],
                 value=format_metric(row["metric_value"]),
                 unit=row["metric_unit"],
@@ -785,22 +990,26 @@ def render_summary(rows: list[dict[str, Any]]) -> str:
             "",
             "## Recent Runs",
             "",
-            "| Run | Commit | Label | Metal elems/s | Metal qkv/s | Metal logits/s | Cached tok/s | Fresh tok/s | QKV proj/s | Logits matvec/s |",
-            "|---|---|---|---:|---:|---:|---:|---:|---:|---:|",
+            "| Run | Outcome | Backend | Coverage | Commit | Label | Metal elems/s | Metal qkv/s | Metal logits/s | Tracked tok/s | Cached tok/s | Fresh tok/s | QKV proj/s | Logits matvec/s |",
+            "|---|---|---|---|---|---|---:|---:|---:|---:|---:|---:|---:|---:|",
         ]
     )
     for run in reversed(recent_runs):
         suites = run["suites"]
         label = run["label"] or run["notes"] or run["git_subject"] or ""
         lines.append(
-            "| `{run_id}` | `{commit}` | {label} | {metal} | {metal_proj} | {metal_logits} | {cached} | {fresh} | {qkv} | {matvec} |".format(
+            "| `{run_id}` | `{outcome}` | `{backend}` | `{coverage}` | `{commit}` | {label} | {metal} | {metal_proj} | {metal_logits} | {tracked} | {cached} | {fresh} | {qkv} | {matvec} |".format(
                 run_id=run["run_id"],
+                outcome=run_outcome_label(run.get("run_outcome", "")),
+                backend=run.get("run_backend", ""),
+                coverage=run.get("run_coverage", ""),
                 commit=run["git_short_commit"],
                 label=label,
                 metal=table_metric(suites.get("metal_add_one")),
                 metal_proj=table_metric(suites.get("metal_qkv_projection")),
                 metal_logits=table_metric(suites.get("metal_logits_projection")),
-                cached=table_metric(suites.get("cached_decode")),
+                tracked=table_metric(suites.get("cached_decode_trace")),
+                cached=table_metric(first_suite_row(suites, "cached_decode", "cached_decode_trace")),
                 fresh=table_metric(suites.get("full_token_pass")),
                 qkv=table_metric(suites.get("blk0_qkv_projection")),
                 matvec=table_metric(suites.get("logits_matvec")),
@@ -824,6 +1033,9 @@ def collect_runs(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
                 "git_subject": row.get("git_subject", ""),
                 "label": row.get("label", ""),
                 "notes": row.get("notes", ""),
+                "run_outcome": row.get("run_outcome", ""),
+                "run_backend": row_run_backend(row),
+                "run_coverage": row_run_coverage(row),
                 "suites": {},
             }
         runs[run_id]["suites"][str(row["suite"])] = row
@@ -839,6 +1051,8 @@ def previous_suite_rows(
         suite = str(row["suite"])
         if str(row["run_id"]) == latest_run_id:
             continue
+        if str(row.get("run_outcome", "")).strip() == RUN_OUTCOME_REJECTED:
+            continue
         previous[suite] = row
     return previous
 
@@ -846,6 +1060,8 @@ def previous_suite_rows(
 def best_suite_rows(rows: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
     best: dict[str, dict[str, Any]] = {}
     for row in rows:
+        if str(row.get("run_outcome", "")).strip() == RUN_OUTCOME_REJECTED:
+            continue
         suite = str(row["suite"])
         if suite not in best or float(row["metric_value"]) > float(best[suite]["metric_value"]):
             best[suite] = row
@@ -856,6 +1072,14 @@ def table_metric(row: dict[str, Any] | None) -> str:
     if not row:
         return ""
     return format_metric(row["metric_value"])
+
+
+def first_suite_row(suites: dict[str, dict[str, Any]], *suite_names: str) -> dict[str, Any] | None:
+    for suite_name in suite_names:
+        row = suites.get(suite_name)
+        if row:
+            return row
+    return None
 
 
 def render_svg(rows: list[dict[str, Any]]) -> str:
@@ -984,6 +1208,7 @@ def suite_color(suite_name: str) -> str:
         "metal_add_one": "#00b4d8",
         "metal_qkv_projection": "#0077b6",
         "metal_logits_projection": "#023e8a",
+        "cached_decode_trace": "#4d96ff",
         "logits_matvec": "#ff6b6b",
         "blk0_qkv_projection": "#f7b801",
         "full_token_pass": "#2ec4b6",

@@ -5,11 +5,23 @@ const metal_runtime = @import("metal/runtime.zig");
 
 pub const default_max_cache_bytes: usize = 4 * 1024 * 1024 * 1024;
 
+pub const Stats = struct {
+    metal_project_calls: usize = 0,
+    metal_project_hits: usize = 0,
+    metal_rowrange_calls: usize = 0,
+    metal_rowrange_hits: usize = 0,
+    cpu_fallback_calls: usize = 0,
+    metal_cache_entries: usize = 0,
+    metal_cache_bytes: usize = 0,
+};
+
 pub const Backend = struct {
     allocator: std.mem.Allocator,
     enabled: bool,
     max_cache_bytes: usize,
     cache_bytes: usize,
+    device_name: []u8,
+    stats: Stats,
     ctx: ?metal_runtime.DenseContext,
     matrix_buffer: ?metal_runtime.DenseBuffer,
     input_buffer: ?metal_runtime.DenseBuffer,
@@ -26,6 +38,8 @@ pub const Backend = struct {
                 .enabled = false,
                 .max_cache_bytes = max_cache_bytes,
                 .cache_bytes = 0,
+                .device_name = try allocator.dupe(u8, "unavailable"),
+                .stats = .{},
                 .ctx = null,
                 .matrix_buffer = null,
                 .input_buffer = null,
@@ -34,12 +48,19 @@ pub const Backend = struct {
             };
         }
 
+        var ctx = try metal_runtime.DenseContext.init();
+        errdefer ctx.deinit();
+        const device_name = try ctx.session.copyDeviceName(allocator);
+        errdefer allocator.free(device_name);
+
         return .{
             .allocator = allocator,
             .enabled = true,
             .max_cache_bytes = max_cache_bytes,
             .cache_bytes = 0,
-            .ctx = try metal_runtime.DenseContext.init(),
+            .device_name = device_name,
+            .stats = .{},
+            .ctx = ctx,
             .matrix_buffer = null,
             .input_buffer = null,
             .output_buffer = null,
@@ -62,8 +83,27 @@ pub const Backend = struct {
             if (self.output_buffer) |*buffer| ctx.releaseBuffer(buffer);
             ctx.deinit();
         }
+        self.allocator.free(self.device_name);
 
         self.* = undefined;
+    }
+
+    pub fn deviceName(self: *const Backend) []const u8 {
+        return self.device_name;
+    }
+
+    pub fn resetStats(self: *Backend) void {
+        self.stats = .{
+            .metal_cache_entries = self.caches.items.len,
+            .metal_cache_bytes = self.cache_bytes,
+        };
+    }
+
+    pub fn snapshotStats(self: *const Backend) Stats {
+        var out = self.stats;
+        out.metal_cache_entries = self.caches.items.len;
+        out.metal_cache_bytes = self.cache_bytes;
+        return out;
     }
 
     pub fn projectAllRows(
@@ -73,7 +113,11 @@ pub const Backend = struct {
         out: []f32,
     ) !bool {
         if (!self.enabled or self.ctx == null) return false;
-        const entry = (try self.getOrCreateCache(tensor)) orelse return false;
+        self.stats.metal_project_calls += 1;
+        const entry = (try self.getOrCreateCache(tensor)) orelse {
+            self.stats.cpu_fallback_calls += 1;
+            return false;
+        };
         if (input.len != entry.cols) return error.InvalidInputBuffer;
         if (out.len < entry.rows) return error.OutputBufferTooSmall;
 
@@ -85,6 +129,7 @@ pub const Backend = struct {
 
         try self.ctx.?.matvec(&entry.buffer, input_buffer, output_buffer, entry.rows, entry.cols);
         @memcpy(out[0..entry.rows], output_buffer.floats[0..entry.rows]);
+        self.stats.metal_project_hits += 1;
         return true;
     }
 
@@ -97,11 +142,17 @@ pub const Backend = struct {
         out: []f32,
     ) !bool {
         if (!self.enabled or self.ctx == null) return false;
+        self.stats.metal_rowrange_calls += 1;
         if (row_start > tensor.row_count or row_count > tensor.row_count - row_start) {
             return error.RowIndexOutOfRange;
         }
         if (input.len != tensor.row_len) return error.InvalidInputBuffer;
         if (out.len < row_count) return error.OutputBufferTooSmall;
+
+        if (!shouldCacheTensor(tensor)) {
+            self.stats.cpu_fallback_calls += 1;
+            return false;
+        }
 
         try self.ensureBuffers(tensor.row_len, row_count);
         try self.ensureMatrixBuffer(row_count * tensor.row_len);
@@ -126,6 +177,7 @@ pub const Backend = struct {
             tensor.row_len,
         );
         @memcpy(out[0..row_count], output_buffer.floats[0..row_count]);
+        self.stats.metal_rowrange_hits += 1;
         return true;
     }
 

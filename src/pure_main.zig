@@ -2,6 +2,7 @@ const std = @import("std");
 const gguf = @import("gguf.zig");
 const gguf_store = @import("gguf_store.zig");
 const metal_backend = @import("metal_backend.zig");
+const metal_decode_engine = @import("metal_decode_engine.zig");
 const ops = @import("ops.zig");
 const parallel_rows = @import("parallel_rows.zig");
 const single_token = @import("single_token.zig");
@@ -29,6 +30,11 @@ const Args = struct {
     cached_decode: bool = false,
     decode_steps: usize = 8,
     metal_decode: bool = false,
+    token_seq_file: ?[]const u8 = null,
+    prompt_tokens: usize = 4,
+    timed_tokens: usize = 8,
+    emit_backend_stats: bool = false,
+    parity_against: metal_decode_engine.ParityAgainst = .none,
 };
 
 pub fn main(init: std.process.Init) !void {
@@ -99,6 +105,16 @@ pub fn main(init: std.process.Init) !void {
         } else {
             try printCachedDecodeDetail(allocator, &stdout.interface, &store, args);
         }
+        try stdout.interface.flush();
+        return;
+    }
+
+    if (args.cached_decode and args.token_seq_file != null) {
+        var store = try gguf_store.Store.open(allocator, init.io, args.model);
+        defer store.deinit(allocator);
+
+        try printSummary(&stdout.interface, &store.parsed);
+        try printCachedDecodeTraceBenchmark(allocator, &stdout.interface, &store, args);
         try stdout.interface.flush();
         return;
     }
@@ -194,6 +210,25 @@ fn parseArgs(
             out.decode_steps = try std.fmt.parseInt(usize, arg_it.next() orelse return error.MissingValue, 10);
         } else if (std.mem.eql(u8, arg, "--metal-decode")) {
             out.metal_decode = true;
+        } else if (std.mem.eql(u8, arg, "--token-seq-file")) {
+            out.token_seq_file = try allocator.dupe(u8, arg_it.next() orelse return error.MissingValue);
+        } else if (std.mem.eql(u8, arg, "--prompt-tokens")) {
+            out.prompt_tokens = try std.fmt.parseInt(usize, arg_it.next() orelse return error.MissingValue, 10);
+        } else if (std.mem.eql(u8, arg, "--timed-tokens")) {
+            out.timed_tokens = try std.fmt.parseInt(usize, arg_it.next() orelse return error.MissingValue, 10);
+        } else if (std.mem.eql(u8, arg, "--emit-backend-stats")) {
+            out.emit_backend_stats = true;
+        } else if (std.mem.eql(u8, arg, "--parity-against")) {
+            const value = arg_it.next() orelse return error.MissingValue;
+            if (std.mem.eql(u8, value, "none")) {
+                out.parity_against = .none;
+            } else if (std.mem.eql(u8, value, "cpu")) {
+                out.parity_against = .cpu;
+            } else if (std.mem.eql(u8, value, "metal")) {
+                out.parity_against = .metal;
+            } else {
+                return error.InvalidParityMode;
+            }
         } else {
             std.debug.print("unknown argument: {s}\n", .{arg});
             printUsage();
@@ -764,6 +799,80 @@ fn printCachedDecodeBenchmark(
     );
 }
 
+fn printCachedDecodeTraceBenchmark(
+    allocator: std.mem.Allocator,
+    writer: *std.Io.Writer,
+    store: *const gguf_store.Store,
+    args: Args,
+) !void {
+    const token_seq_path = args.token_seq_file orelse return error.MissingTokenSequence;
+    if (args.timed_tokens == 0) return error.InvalidBenchIters;
+
+    const token_seq = try loadTokenSequence(allocator, token_seq_path);
+    defer allocator.free(token_seq);
+
+    const max_seq_len = try std.math.add(usize, args.prompt_tokens, args.timed_tokens);
+    const top_limit = @max(@as(usize, 8), args.value_limit);
+    var engine = try metal_decode_engine.Engine.init(
+        allocator,
+        store,
+        args.metal_decode,
+        max_seq_len,
+    );
+    defer engine.deinit();
+
+    const result = try engine.benchmarkTrace(
+        token_seq,
+        args.prompt_tokens,
+        args.timed_tokens,
+        top_limit,
+        args.parity_against,
+    );
+
+    try writer.writeAll("Cached decode trace benchmark\n");
+    try writer.print("token_seq_file: {s}\n", .{token_seq_path});
+    try writer.print("decode_backend: {s}\n", .{result.profile.decode_backend});
+    try writer.print("metal_device_name: {s}\n", .{result.profile.metal_device_name});
+    try writer.print("prompt_tokens: {d}\n", .{result.prompt_tokens});
+    try writer.print("timed_tokens: {d}\n", .{result.timed_tokens});
+    try writer.print("elapsed_s: {d}\n", .{result.elapsed_s});
+    try writer.print("steady_decode_tok_per_s: {d}\n", .{result.steady_decode_tok_per_s});
+    try writer.print("first_decode_token_ms: {d}\n", .{result.first_decode_token_ms});
+    try writer.print("median_decode_token_ms: {d}\n", .{result.median_decode_token_ms});
+    try writer.print("p95_decode_token_ms: {d}\n", .{result.p95_decode_token_ms});
+    try writer.print("checksum: {d}\n", .{result.checksum});
+    try writer.print("argmax_sequence_hash: {d}\n", .{result.argmax_sequence_hash});
+    try writer.print("topk_logit_hash: {d}\n", .{result.topk_logit_hash});
+    try writer.print("argmax_mismatch_count: {d}\n", .{result.argmax_mismatch_count});
+    try writer.print("max_topk_logit_delta: {d}\n", .{result.max_topk_logit_delta});
+    try writer.print("mean_topk_logit_delta: {d}\n", .{result.mean_topk_logit_delta});
+    try writer.print("final_argmax_token_id: {d}\n", .{result.final_argmax_token_id});
+    try writer.print("final_argmax_logit: {d}\n", .{result.final_argmax_logit});
+    try writer.print("top_count: {d}\n", .{result.top_count});
+
+    if (args.emit_backend_stats or args.metal_decode) {
+        try writer.print("metal_project_calls: {d}\n", .{result.profile.metal_project_calls});
+        try writer.print("metal_project_hits: {d}\n", .{result.profile.metal_project_hits});
+        try writer.print(
+            "metal_project_hit_rate: {d}\n",
+            .{ratioAsPercent(result.profile.metal_project_hits, result.profile.metal_project_calls)},
+        );
+        try writer.print("metal_rowrange_calls: {d}\n", .{result.profile.metal_rowrange_calls});
+        try writer.print("metal_rowrange_hits: {d}\n", .{result.profile.metal_rowrange_hits});
+        try writer.print(
+            "metal_rowrange_hit_rate: {d}\n",
+            .{ratioAsPercent(result.profile.metal_rowrange_hits, result.profile.metal_rowrange_calls)},
+        );
+        try writer.print("cpu_fallback_calls: {d}\n", .{result.profile.cpu_fallback_calls});
+        try writer.print("metal_cache_entries: {d}\n", .{result.profile.metal_cache_entries});
+        try writer.print("metal_cache_bytes: {d}\n", .{result.profile.metal_cache_bytes});
+    }
+
+    try writer.writeAll(
+        "note: this is fixed-trace cached decode over real model state. The current Metal path still reflects the in-progress backend rewrite, so coverage metrics matter as much as raw tok/s.\n",
+    );
+}
+
 fn runTensorBenchPass(
     tensor: gguf_store.TensorView,
     start_row: usize,
@@ -860,6 +969,40 @@ fn fillSyntheticInput(out: []f32) void {
     }
 }
 
+fn loadTokenSequence(
+    allocator: std.mem.Allocator,
+    path: []const u8,
+) ![]usize {
+    const file = try std.posix.openat(std.c.AT.FDCWD, path, .{ .ACCMODE = .RDONLY }, 0);
+    defer _ = std.c.close(file);
+    var file_bytes = std.ArrayList(u8).empty;
+    defer file_bytes.deinit(allocator);
+
+    var buf: [4096]u8 = undefined;
+    while (true) {
+        const read_len = try std.posix.read(file, &buf);
+        if (read_len == 0) break;
+        try file_bytes.appendSlice(allocator, buf[0..read_len]);
+    }
+
+    var tokens = std.ArrayList(usize).empty;
+    errdefer tokens.deinit(allocator);
+
+    var it = std.mem.tokenizeAny(u8, file_bytes.items, "[], \n\r\t");
+    while (it.next()) |entry| {
+        if (entry.len == 0) continue;
+        try tokens.append(allocator, try std.fmt.parseInt(usize, entry, 10));
+    }
+
+    if (tokens.items.len == 0) return error.EmptyTokenSequence;
+    return tokens.toOwnedSlice(allocator);
+}
+
+fn ratioAsPercent(numerator: usize, denominator: usize) f64 {
+    if (denominator == 0) return 0;
+    return 100.0 * @as(f64, @floatFromInt(numerator)) / @as(f64, @floatFromInt(denominator));
+}
+
 fn loadNormalizedTokenHidden(
     allocator: std.mem.Allocator,
     store: *const gguf_store.Store,
@@ -928,6 +1071,11 @@ fn printUsage() void {
         \\  --cached-decode      Run repeated-token cached decode with real model state.
         \\  --decode-steps N     Token steps for cached decode detail mode. Default: 8
         \\  --metal-decode       Use the native Zig Metal backend for supported projection tensors.
+        \\  --token-seq-file P   Fixed token trace file (JSON or newline-delimited token ids).
+        \\  --prompt-tokens N    Prompt prefix tokens for trace decode. Default: 4
+        \\  --timed-tokens N     Timed decode tokens for trace decode. Default: 8
+        \\  --emit-backend-stats Print Metal backend coverage counters.
+        \\  --parity-against M   Compare trace decode against cpu|metal|none. Default: none
         \\  --help               Print this help text.
         \\
         \\Supported row decoding and row-dot today: f32, q4_K, q6_K.

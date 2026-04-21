@@ -1,0 +1,26 @@
+{
+  "baseline_run_id": "20260421T171445.237004Z-2d4b1f0-tracked",
+  "branch": "codex/zig-baseline-qwen36",
+  "code_commit": "abc1234def567890abc1234def567890abc1234d",
+  "comparisons": [
+    {
+      "baseline_run_id": "20260421T171445.237004Z-2d4b1f0-tracked",
+      "baseline_value": 1.0547366111734577,
+      "current_value": 1.1034,
+      "delta_pct": 4.614721630994545,
+      "suite": "cached_decode_trace",
+      "suite_title": "Tracked Cached Decode"
+    }
+  ],
+  "decision": "accepted",
+  "gate_skipped": false,
+  "max_regression_pct": 5.0,
+  "notes": "tracked round fixture",
+  "profile": "tracked",
+  "regressions": [],
+  "round_id": "r100",
+  "run_backend": "metal+metal-cache",
+  "run_coverage": "metal-kernels+decode",
+  "run_id": "20260421T181500.000000Z-abc1234-tracked",
+  "trace_version": 1
+}
