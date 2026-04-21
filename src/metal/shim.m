@@ -228,6 +228,7 @@ dt_metal_status dt_metal_buffer_create(
     @autoreleasepool {
         if (out_info != NULL) {
             out_info->handle = NULL;
+            out_info->contents = NULL;
             out_info->floats = NULL;
         }
         dt_metal_clear_error(error_out);
@@ -260,7 +261,45 @@ dt_metal_status dt_metal_buffer_create(
         wrapped->floats = (float *)contents;
         if (out_info != NULL) {
             out_info->handle = wrapped;
+            out_info->contents = contents;
             out_info->floats = wrapped->floats;
+        }
+        return DT_METAL_STATUS_OK;
+    }
+}
+
+dt_metal_status dt_metal_buffer_wrap_bytes_no_copy(
+    dt_metal_session *session,
+    const void *bytes,
+    size_t byte_length,
+    dt_metal_buffer **out_buffer,
+    char **error_out
+) {
+    @autoreleasepool {
+        if (out_buffer != NULL) {
+            *out_buffer = NULL;
+        }
+        dt_metal_clear_error(error_out);
+
+        id<MTLBuffer> buffer = [session->device newBufferWithBytesNoCopy:(void *)bytes
+                                                                  length:byte_length
+                                                                 options:MTLResourceStorageModeShared
+                                                             deallocator:nil];
+        if (buffer == nil) {
+            return DT_METAL_STATUS_BUFFER_CREATION_FAILED;
+        }
+
+        dt_metal_buffer *wrapped = calloc(1, sizeof(*wrapped));
+        if (wrapped == NULL) {
+            dt_metal_set_error_c_string(error_out, "out of memory");
+            [buffer release];
+            return DT_METAL_STATUS_OUT_OF_MEMORY;
+        }
+
+        wrapped->buffer = buffer;
+        wrapped->floats = NULL;
+        if (out_buffer != NULL) {
+            *out_buffer = wrapped;
         }
         return DT_METAL_STATUS_OK;
     }
@@ -420,4 +459,101 @@ dt_metal_status dt_metal_dispatch_dense_matvec(
 
         return dt_metal_finish_command(command_buffer, error_out);
     }
+}
+
+static dt_metal_status dt_metal_dispatch_quant_matvec(
+    dt_metal_session *session,
+    dt_metal_pipeline *pipeline,
+    dt_metal_buffer *weights,
+    dt_metal_buffer *vector,
+    dt_metal_buffer *output,
+    size_t threadgroup_count,
+    size_t threadgroup_width,
+    uint32_t row_stride_bytes,
+    uint32_t rows,
+    uint32_t cols,
+    char **error_out
+) {
+    @autoreleasepool {
+        dt_metal_clear_error(error_out);
+
+        id<MTLCommandBuffer> command_buffer = [session->queue commandBuffer];
+        if (command_buffer == nil) {
+            return DT_METAL_STATUS_COMMAND_BUFFER_CREATION_FAILED;
+        }
+
+        id<MTLComputeCommandEncoder> encoder = [command_buffer computeCommandEncoder];
+        if (encoder == nil) {
+            return DT_METAL_STATUS_COMPUTE_ENCODER_CREATION_FAILED;
+        }
+
+        [encoder setComputePipelineState:pipeline->pipeline];
+        [encoder setBuffer:weights->buffer offset:0 atIndex:0];
+        [encoder setBuffer:vector->buffer offset:0 atIndex:1];
+        [encoder setBuffer:output->buffer offset:0 atIndex:2];
+        [encoder setBytes:&row_stride_bytes length:sizeof(row_stride_bytes) atIndex:3];
+        [encoder setBytes:&cols length:sizeof(cols) atIndex:4];
+        [encoder setBytes:&rows length:sizeof(rows) atIndex:5];
+        [encoder dispatchThreadgroups:MTLSizeMake(threadgroup_count, 1, 1)
+           threadsPerThreadgroup:MTLSizeMake(threadgroup_width, 1, 1)];
+        [encoder endEncoding];
+
+        return dt_metal_finish_command(command_buffer, error_out);
+    }
+}
+
+dt_metal_status dt_metal_dispatch_q4_k_matvec(
+    dt_metal_session *session,
+    dt_metal_pipeline *pipeline,
+    dt_metal_buffer *weights,
+    dt_metal_buffer *vector,
+    dt_metal_buffer *output,
+    size_t threadgroup_count,
+    size_t threadgroup_width,
+    uint32_t row_stride_bytes,
+    uint32_t rows,
+    uint32_t cols,
+    char **error_out
+) {
+    return dt_metal_dispatch_quant_matvec(
+        session,
+        pipeline,
+        weights,
+        vector,
+        output,
+        threadgroup_count,
+        threadgroup_width,
+        row_stride_bytes,
+        rows,
+        cols,
+        error_out
+    );
+}
+
+dt_metal_status dt_metal_dispatch_q6_k_matvec(
+    dt_metal_session *session,
+    dt_metal_pipeline *pipeline,
+    dt_metal_buffer *weights,
+    dt_metal_buffer *vector,
+    dt_metal_buffer *output,
+    size_t threadgroup_count,
+    size_t threadgroup_width,
+    uint32_t row_stride_bytes,
+    uint32_t rows,
+    uint32_t cols,
+    char **error_out
+) {
+    return dt_metal_dispatch_quant_matvec(
+        session,
+        pipeline,
+        weights,
+        vector,
+        output,
+        threadgroup_count,
+        threadgroup_width,
+        row_stride_bytes,
+        rows,
+        cols,
+        error_out
+    );
 }

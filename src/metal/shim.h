@@ -27,6 +27,7 @@ typedef struct dt_metal_buffer dt_metal_buffer;
 
 typedef struct {
     dt_metal_buffer *handle;
+    void *contents;
     float *floats;
 } dt_metal_buffer_info;
 
@@ -56,6 +57,13 @@ dt_metal_status dt_metal_buffer_create(
     dt_metal_buffer_info *out_info,
     char **error_out
 );
+dt_metal_status dt_metal_buffer_wrap_bytes_no_copy(
+    dt_metal_session *session,
+    const void *bytes,
+    size_t byte_length,
+    dt_metal_buffer **out_buffer,
+    char **error_out
+);
 void dt_metal_buffer_destroy(dt_metal_buffer *buffer);
 
 dt_metal_status dt_metal_pipeline_create(
@@ -83,6 +91,32 @@ dt_metal_status dt_metal_dispatch_dense_matvec(
     dt_metal_buffer *output,
     size_t threadgroup_count,
     size_t threadgroup_width,
+    uint32_t rows,
+    uint32_t cols,
+    char **error_out
+);
+dt_metal_status dt_metal_dispatch_q4_k_matvec(
+    dt_metal_session *session,
+    dt_metal_pipeline *pipeline,
+    dt_metal_buffer *weights,
+    dt_metal_buffer *vector,
+    dt_metal_buffer *output,
+    size_t threadgroup_count,
+    size_t threadgroup_width,
+    uint32_t row_stride_bytes,
+    uint32_t rows,
+    uint32_t cols,
+    char **error_out
+);
+dt_metal_status dt_metal_dispatch_q6_k_matvec(
+    dt_metal_session *session,
+    dt_metal_pipeline *pipeline,
+    dt_metal_buffer *weights,
+    dt_metal_buffer *vector,
+    dt_metal_buffer *output,
+    size_t threadgroup_count,
+    size_t threadgroup_width,
+    uint32_t row_stride_bytes,
     uint32_t rows,
     uint32_t cols,
     char **error_out

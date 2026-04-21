@@ -10,6 +10,7 @@ pub const Report = runtime_impl.Report;
 pub const BenchmarkResult = runtime_impl.BenchmarkResult;
 pub const MatVecBenchmarkResult = runtime_impl.MatVecBenchmarkResult;
 pub const DenseBuffer = runtime_impl.DenseBuffer;
+pub const RawBuffer = runtime_impl.RawBuffer;
 pub const DenseContext = runtime_impl.DenseContext;
 pub const runBootstrap = runtime_impl.runBootstrap;
 pub const runBenchmark = runtime_impl.runBenchmark;

@@ -81,6 +81,11 @@ pub const DenseBuffer = struct {
     len: usize,
 };
 
+pub const RawBuffer = struct {
+    object: ?*anyopaque,
+    len_bytes: usize,
+};
+
 pub const DenseContext = struct {
     pub fn init() Error!DenseContext {
         return error.UnsupportedPlatform;
@@ -101,6 +106,17 @@ pub const DenseContext = struct {
         buffer.* = undefined;
     }
 
+    pub fn wrapBytesNoCopy(self: *DenseContext, bytes: []const u8) Error!RawBuffer {
+        _ = self;
+        _ = bytes;
+        return error.UnsupportedPlatform;
+    }
+
+    pub fn releaseRawBuffer(self: *DenseContext, buffer: *RawBuffer) void {
+        _ = self;
+        buffer.* = undefined;
+    }
+
     pub fn matvec(
         self: *DenseContext,
         matrix: *const DenseBuffer,
@@ -115,6 +131,44 @@ pub const DenseContext = struct {
         _ = output;
         _ = rows;
         _ = cols;
+        return error.UnsupportedPlatform;
+    }
+
+    pub fn matvecQ4K(
+        self: *DenseContext,
+        weights: *const RawBuffer,
+        vector: *const DenseBuffer,
+        output: *const DenseBuffer,
+        rows: usize,
+        cols: usize,
+        row_bytes: usize,
+    ) Error!void {
+        _ = self;
+        _ = weights;
+        _ = vector;
+        _ = output;
+        _ = rows;
+        _ = cols;
+        _ = row_bytes;
+        return error.UnsupportedPlatform;
+    }
+
+    pub fn matvecQ6K(
+        self: *DenseContext,
+        weights: *const RawBuffer,
+        vector: *const DenseBuffer,
+        output: *const DenseBuffer,
+        rows: usize,
+        cols: usize,
+        row_bytes: usize,
+    ) Error!void {
+        _ = self;
+        _ = weights;
+        _ = vector;
+        _ = output;
+        _ = rows;
+        _ = cols;
+        _ = row_bytes;
         return error.UnsupportedPlatform;
     }
 };

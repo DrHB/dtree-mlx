@@ -59,26 +59,37 @@ pub const MatVecBenchmarkResult = struct {
 };
 
 pub const DenseBuffer = buffer_mod.DenseBuffer;
+pub const RawBuffer = buffer_mod.RawBuffer;
 
 pub const DenseContext = struct {
     session: device.Session,
-    pipeline: pipeline_mod.Pipeline,
+    dense_pipeline: pipeline_mod.Pipeline,
+    q4_k_pipeline: pipeline_mod.Pipeline,
+    q6_k_pipeline: pipeline_mod.Pipeline,
 
     pub fn init() Error!DenseContext {
         var session = try device.Session.init();
         errdefer session.deinit();
 
-        var pipeline = try pipeline_mod.create(&session, "dense_matvec_f32");
-        errdefer pipeline.deinit();
+        var dense_pipeline = try pipeline_mod.create(&session, "dense_matvec_f32");
+        errdefer dense_pipeline.deinit();
+        var q4_k_pipeline = try pipeline_mod.create(&session, "dmmv_q4_k");
+        errdefer q4_k_pipeline.deinit();
+        var q6_k_pipeline = try pipeline_mod.create(&session, "dmmv_q6_k");
+        errdefer q6_k_pipeline.deinit();
 
         return .{
             .session = session,
-            .pipeline = pipeline,
+            .dense_pipeline = dense_pipeline,
+            .q4_k_pipeline = q4_k_pipeline,
+            .q6_k_pipeline = q6_k_pipeline,
         };
     }
 
     pub fn deinit(self: *DenseContext) void {
-        self.pipeline.deinit();
+        self.q6_k_pipeline.deinit();
+        self.q4_k_pipeline.deinit();
+        self.dense_pipeline.deinit();
         self.session.deinit();
         self.* = undefined;
     }
@@ -90,6 +101,15 @@ pub const DenseContext = struct {
     pub fn releaseBuffer(self: *DenseContext, buffer: *DenseBuffer) void {
         _ = self;
         buffer_mod.releaseBuffer(buffer);
+    }
+
+    pub fn wrapBytesNoCopy(self: *DenseContext, bytes: []const u8) Error!RawBuffer {
+        return buffer_mod.wrapBytesNoCopy(&self.session, bytes);
+    }
+
+    pub fn releaseRawBuffer(self: *DenseContext, buffer: *RawBuffer) void {
+        _ = self;
+        buffer_mod.releaseRawBuffer(buffer);
     }
 
     pub fn matvec(
@@ -107,12 +127,54 @@ pub const DenseContext = struct {
 
         try command.dispatchDenseMatVec(
             &self.session,
-            &self.pipeline,
+            &self.dense_pipeline,
             matrix,
             vector,
             output,
             rows,
             cols,
+        );
+    }
+
+    pub fn matvecQ4K(
+        self: *DenseContext,
+        weights: *const RawBuffer,
+        vector: *const DenseBuffer,
+        output: *const DenseBuffer,
+        rows: usize,
+        cols: usize,
+        row_bytes: usize,
+    ) Error!void {
+        try command.dispatchQ4KMatVec(
+            &self.session,
+            &self.q4_k_pipeline,
+            weights,
+            vector,
+            output,
+            rows,
+            cols,
+            row_bytes,
+        );
+    }
+
+    pub fn matvecQ6K(
+        self: *DenseContext,
+        weights: *const RawBuffer,
+        vector: *const DenseBuffer,
+        output: *const DenseBuffer,
+        rows: usize,
+        cols: usize,
+        row_bytes: usize,
+    ) Error!void {
+        try command.dispatchQ6KMatVec(
+            &self.session,
+            &self.q6_k_pipeline,
+            weights,
+            vector,
+            output,
+            rows,
+            cols,
+            row_bytes,
         );
     }
 };

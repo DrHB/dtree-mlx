@@ -8,6 +8,8 @@ const Error = common.Error;
 const shader_files = [_][]const u8{
     "add_one.metal",
     "dense_matvec_f32.metal",
+    "dmmv_q4_k.metal",
+    "dmmv_q6_k.metal",
 };
 
 const shader_dir_env_var = "DTREE_MLX_METAL_SHADER_DIR";

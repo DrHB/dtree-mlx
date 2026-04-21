@@ -69,6 +69,52 @@ pub fn dispatchDenseMatVec(
     );
 }
 
+pub fn dispatchQ4KMatVec(
+    session: *const device.Session,
+    pipeline: *const pipeline_mod.Pipeline,
+    weights: *const buffer_mod.RawBuffer,
+    vector: *const buffer_mod.DenseBuffer,
+    output: *const buffer_mod.DenseBuffer,
+    rows: usize,
+    cols: usize,
+    row_bytes: usize,
+) Error!void {
+    try dispatchQuantizedMatVec(
+        common.c.dt_metal_dispatch_q4_k_matvec,
+        session,
+        pipeline,
+        weights,
+        vector,
+        output,
+        rows,
+        cols,
+        row_bytes,
+    );
+}
+
+pub fn dispatchQ6KMatVec(
+    session: *const device.Session,
+    pipeline: *const pipeline_mod.Pipeline,
+    weights: *const buffer_mod.RawBuffer,
+    vector: *const buffer_mod.DenseBuffer,
+    output: *const buffer_mod.DenseBuffer,
+    rows: usize,
+    cols: usize,
+    row_bytes: usize,
+) Error!void {
+    try dispatchQuantizedMatVec(
+        common.c.dt_metal_dispatch_q6_k_matvec,
+        session,
+        pipeline,
+        weights,
+        vector,
+        output,
+        rows,
+        cols,
+        row_bytes,
+    );
+}
+
 fn chooseThreadgroupWidth(thread_execution_width: usize, max_total_threads: usize, element_count: usize) usize {
     const preferred = @min(@max(thread_execution_width * 8, thread_execution_width), max_total_threads);
     const capped = @min(preferred, element_count);
@@ -80,4 +126,47 @@ fn chooseMatVecThreadgroupWidth(thread_execution_width: usize, max_total_threads
     _ = cols;
     if (thread_execution_width > common.matvec_threadgroup_width) return thread_execution_width;
     return @min(common.matvec_threadgroup_width, max_total_threads);
+}
+
+fn dispatchQuantizedMatVec(
+    comptime dispatch_fn: anytype,
+    session: *const device.Session,
+    pipeline: *const pipeline_mod.Pipeline,
+    weights: *const buffer_mod.RawBuffer,
+    vector: *const buffer_mod.DenseBuffer,
+    output: *const buffer_mod.DenseBuffer,
+    rows: usize,
+    cols: usize,
+    row_bytes: usize,
+) Error!void {
+    const rows_u32 = std.math.cast(u32, rows) orelse return error.InvalidRowCount;
+    const cols_u32 = std.math.cast(u32, cols) orelse return error.InvalidColCount;
+    const row_bytes_u32 = std.math.cast(u32, row_bytes) orelse return error.InvalidInputBuffer;
+    if (vector.len < cols) return error.InvalidInputBuffer;
+    if (output.len < rows) return error.OutputBufferTooSmall;
+
+    const threadgroup_width = chooseMatVecThreadgroupWidth(
+        pipeline.thread_execution_width,
+        pipeline.max_total_threads_per_threadgroup,
+        rows,
+    );
+    const threadgroup_count = std.math.divCeil(usize, rows, threadgroup_width) catch unreachable;
+
+    var error_message: [*c]u8 = null;
+    try common.checkStatus(
+        dispatch_fn(
+            session.handle,
+            pipeline.handle,
+            buffer_mod.handleRaw(weights),
+            buffer_mod.handle(vector),
+            buffer_mod.handle(output),
+            threadgroup_count,
+            threadgroup_width,
+            row_bytes_u32,
+            rows_u32,
+            cols_u32,
+            &error_message,
+        ),
+        error_message,
+    );
 }
