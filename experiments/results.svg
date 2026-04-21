@@ -9,7 +9,7 @@ text { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; }
 .axis-label { fill: #7b8ba1; font-size: 11px; }
 </style>
 <text class="title" x="28" y="36">Pure-Zig Optimization History</text>
-<text class="muted" x="28" y="60">Generated from experiments/results.csv on 2026-04-21T14:20:02.785445+00:00</text>
+<text class="muted" x="28" y="60">Generated from experiments/results.csv on 2026-04-21T14:20:12.280840+00:00</text>
 <g>
 <rect x="28" y="88" width="520" height="220" rx="18" fill="#0f1b2b" stroke="#1d3148" stroke-width="1"/>
 <text class="panel-title" x="46" y="116">Logits Head Matvec</text>
@@ -61,22 +61,23 @@ text { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; }
 <g>
 <rect x="28" y="332" width="520" height="220" rx="18" fill="#0f1b2b" stroke="#1d3148" stroke-width="1"/>
 <text class="panel-title" x="46" y="360">Fresh Full Token Pass</text>
-<text class="panel-meta" x="46" y="376">latest 0.42981 tok/s   best 0.42981 tok/s</text>
-<text class="panel-meta" x="530" y="360" text-anchor="end">11a5352</text>
-<text class="panel-meta" x="530" y="376" text-anchor="end">2026-04-21T14:17:30.141807+00:00</text>
+<text class="panel-meta" x="46" y="376">latest 0.43082 tok/s   best 0.43082 tok/s</text>
+<text class="panel-meta" x="530" y="360" text-anchor="end">d17380f</text>
+<text class="panel-meta" x="530" y="376" text-anchor="end">2026-04-21T14:20:12.280840+00:00</text>
 <line x1="82" y1="514.00" x2="530" y2="514.00" stroke="#1d3148" stroke-width="1"/>
-<text class="axis-label" x="36" y="518.00">0.00309</text>
+<text class="axis-label" x="36" y="518.00">0.00297</text>
 <line x1="82" y1="480.50" x2="530" y2="480.50" stroke="#1d3148" stroke-width="1"/>
-<text class="axis-label" x="36" y="484.50">0.12120</text>
+<text class="axis-label" x="36" y="484.50">0.12139</text>
 <line x1="82" y1="447.00" x2="530" y2="447.00" stroke="#1d3148" stroke-width="1"/>
-<text class="axis-label" x="36" y="451.00">0.23931</text>
+<text class="axis-label" x="36" y="451.00">0.23982</text>
 <line x1="82" y1="413.50" x2="530" y2="413.50" stroke="#1d3148" stroke-width="1"/>
-<text class="axis-label" x="36" y="417.50">0.35742</text>
+<text class="axis-label" x="36" y="417.50">0.35824</text>
 <line x1="82" y1="380.00" x2="530" y2="380.00" stroke="#1d3148" stroke-width="1"/>
-<text class="axis-label" x="36" y="384.00">0.47553</text>
-<polyline fill="none" stroke="#2ec4b6" stroke-width="3" points="82.00,501.03 306.00,500.99 530.00,392.97"/>
+<text class="axis-label" x="36" y="384.00">0.47666</text>
+<polyline fill="none" stroke="#2ec4b6" stroke-width="3" points="82.00,501.03 231.33,500.99 380.67,393.26 530.00,392.97"/>
 <circle cx="82.00" cy="501.03" r="3.0" fill="#2ec4b6" stroke="#09111b" stroke-width="1.0"/>
-<circle cx="306.00" cy="500.99" r="3.0" fill="#2ec4b6" stroke="#09111b" stroke-width="1.0"/>
+<circle cx="231.33" cy="500.99" r="3.0" fill="#2ec4b6" stroke="#09111b" stroke-width="1.0"/>
+<circle cx="380.67" cy="393.26" r="3.0" fill="#2ec4b6" stroke="#09111b" stroke-width="1.0"/>
 <circle cx="530.00" cy="392.97" r="4.5" fill="#2ec4b6" stroke="#ffffff" stroke-width="1.5"/>
 <text class="axis-label" x="82" y="540">oldest</text>
 <text class="axis-label" x="530" y="540" text-anchor="end">latest</text>
@@ -84,22 +85,23 @@ text { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; }
 <g>
 <rect x="572" y="332" width="520" height="220" rx="18" fill="#0f1b2b" stroke="#1d3148" stroke-width="1"/>
 <text class="panel-title" x="590" y="360">Cached Decode</text>
-<text class="panel-meta" x="590" y="376">latest 0.40603 tok/s   best 0.40603 tok/s</text>
-<text class="panel-meta" x="1074" y="360" text-anchor="end">11a5352</text>
-<text class="panel-meta" x="1074" y="376" text-anchor="end">2026-04-21T14:17:30.141807+00:00</text>
+<text class="panel-meta" x="590" y="376">latest 0.40690 tok/s   best 0.40690 tok/s</text>
+<text class="panel-meta" x="1074" y="360" text-anchor="end">d17380f</text>
+<text class="panel-meta" x="1074" y="376" text-anchor="end">2026-04-21T14:20:12.280840+00:00</text>
 <line x1="626" y1="514.00" x2="1074" y2="514.00" stroke="#1d3148" stroke-width="1"/>
-<text class="axis-label" x="580" y="518.00">0.00152</text>
+<text class="axis-label" x="580" y="518.00">0.00142</text>
 <line x1="626" y1="480.50" x2="1074" y2="480.50" stroke="#1d3148" stroke-width="1"/>
-<text class="axis-label" x="580" y="484.50">0.11348</text>
+<text class="axis-label" x="580" y="484.50">0.11365</text>
 <line x1="626" y1="447.00" x2="1074" y2="447.00" stroke="#1d3148" stroke-width="1"/>
-<text class="axis-label" x="580" y="451.00">0.22545</text>
+<text class="axis-label" x="580" y="451.00">0.22588</text>
 <line x1="626" y1="413.50" x2="1074" y2="413.50" stroke="#1d3148" stroke-width="1"/>
-<text class="axis-label" x="580" y="417.50">0.33741</text>
+<text class="axis-label" x="580" y="417.50">0.33811</text>
 <line x1="626" y1="380.00" x2="1074" y2="380.00" stroke="#1d3148" stroke-width="1"/>
-<text class="axis-label" x="580" y="384.00">0.44937</text>
-<polyline fill="none" stroke="#3a86ff" stroke-width="3" points="626.00,500.25 850.00,501.03 1074.00,392.97"/>
+<text class="axis-label" x="580" y="384.00">0.45034</text>
+<polyline fill="none" stroke="#3a86ff" stroke-width="3" points="626.00,500.25 775.33,501.03 924.67,393.23 1074.00,392.97"/>
 <circle cx="626.00" cy="500.25" r="3.0" fill="#3a86ff" stroke="#09111b" stroke-width="1.0"/>
-<circle cx="850.00" cy="501.03" r="3.0" fill="#3a86ff" stroke="#09111b" stroke-width="1.0"/>
+<circle cx="775.33" cy="501.03" r="3.0" fill="#3a86ff" stroke="#09111b" stroke-width="1.0"/>
+<circle cx="924.67" cy="393.23" r="3.0" fill="#3a86ff" stroke="#09111b" stroke-width="1.0"/>
 <circle cx="1074.00" cy="392.97" r="4.5" fill="#3a86ff" stroke="#ffffff" stroke-width="1.5"/>
 <text class="axis-label" x="626" y="540">oldest</text>
 <text class="axis-label" x="1074" y="540" text-anchor="end">latest</text>

@@ -136,7 +136,15 @@ def main(argv: list[str] | None = None) -> None:
 
 
 def git_status() -> list[StatusEntry]:
-    lines = git_output(["status", "--porcelain=v1"]).splitlines()
+    try:
+        lines = subprocess.check_output(
+            ["git", "status", "--porcelain=v1"],
+            cwd=REPO_ROOT,
+            text=True,
+            stderr=subprocess.DEVNULL,
+        ).splitlines()
+    except subprocess.CalledProcessError as exc:
+        raise SystemExit(f"git status --porcelain=v1 failed with exit code {exc.returncode}") from exc
     entries: list[StatusEntry] = []
     for line in lines:
         if not line:

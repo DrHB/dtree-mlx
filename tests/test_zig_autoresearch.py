@@ -45,6 +45,33 @@ def test_default_round_messages_are_stable():
     )
 
 
+def test_round_status_parser_keeps_leading_space_paths():
+    round_path = Path(__file__).resolve().parents[1] / "scripts" / "zig_round.py"
+    round_spec = importlib.util.spec_from_file_location("zig_round", round_path)
+    assert round_spec is not None and round_spec.loader is not None
+    round_module = importlib.util.module_from_spec(round_spec)
+    sys.modules[round_spec.name] = round_module
+    round_spec.loader.exec_module(round_module)
+
+    completed = __import__("subprocess").CompletedProcess(
+        args=["git", "status", "--porcelain=v1"],
+        returncode=0,
+        stdout=" M experiments/results.csv\n?? experiments/run.json\n",
+    )
+
+    original = round_module.subprocess.check_output
+    round_module.subprocess.check_output = lambda *args, **kwargs: completed.stdout
+    try:
+        entries = round_module.git_status()
+    finally:
+        round_module.subprocess.check_output = original
+
+    assert entries[0].path == "experiments/results.csv"
+    assert entries[0].is_experiment is True
+    assert entries[1].path == "experiments/run.json"
+    assert entries[1].is_experiment is True
+
+
 def test_build_suite_specs_respects_profiles():
     assert [spec.name for spec in MODULE.build_suite_specs("model.gguf", 42, "micro")] == [
         "logits_matvec",
