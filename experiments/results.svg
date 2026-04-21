@@ -9,7 +9,7 @@ text { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; }
 .axis-label { fill: #7b8ba1; font-size: 11px; }
 </style>
 <text class="title" x="28" y="36">Pure-Zig Optimization History</text>
-<text class="muted" x="28" y="60">Generated from experiments/results.csv on 2026-04-21T15:39:43.916627+00:00</text>
+<text class="muted" x="28" y="60">Generated from experiments/results.csv on 2026-04-21T16:08:47.061448+00:00</text>
 <g>
 <rect x="28" y="88" width="520" height="220" rx="18" fill="#0f1b2b" stroke="#1d3148" stroke-width="1"/>
 <text class="panel-title" x="46" y="116">Metal Add-One</text>
@@ -136,56 +136,58 @@ text { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; }
 <g>
 <rect x="572" y="576" width="520" height="220" rx="18" fill="#0f1b2b" stroke="#1d3148" stroke-width="1"/>
 <text class="panel-title" x="590" y="604">Fresh Full Token Pass</text>
-<text class="panel-meta" x="590" y="620">latest 0.64510 tok/s   best 0.64510 tok/s</text>
-<text class="panel-meta" x="1074" y="604" text-anchor="end">c4e45fa</text>
-<text class="panel-meta" x="1074" y="620" text-anchor="end">2026-04-21T14:41:57.327290+00:00</text>
+<text class="panel-meta" x="590" y="620">latest 0.68616 tok/s   best 0.68616 tok/s</text>
+<text class="panel-meta" x="1074" y="604" text-anchor="end">0b22f76</text>
+<text class="panel-meta" x="1074" y="620" text-anchor="end">2026-04-21T16:08:47.061448+00:00</text>
 <line x1="626" y1="758.00" x2="1074" y2="758.00" stroke="#1d3148" stroke-width="1"/>
 <text class="axis-label" x="580" y="762.00">0.00000</text>
 <line x1="626" y1="724.50" x2="1074" y2="724.50" stroke="#1d3148" stroke-width="1"/>
-<text class="axis-label" x="580" y="728.50">0.17916</text>
+<text class="axis-label" x="580" y="728.50">0.19066</text>
 <line x1="626" y1="691.00" x2="1074" y2="691.00" stroke="#1d3148" stroke-width="1"/>
-<text class="axis-label" x="580" y="695.00">0.35833</text>
+<text class="axis-label" x="580" y="695.00">0.38132</text>
 <line x1="626" y1="657.50" x2="1074" y2="657.50" stroke="#1d3148" stroke-width="1"/>
-<text class="axis-label" x="580" y="661.50">0.53749</text>
+<text class="axis-label" x="580" y="661.50">0.57198</text>
 <line x1="626" y1="624.00" x2="1074" y2="624.00" stroke="#1d3148" stroke-width="1"/>
-<text class="axis-label" x="580" y="628.00">0.71665</text>
-<polyline fill="none" stroke="#2ec4b6" stroke-width="3" points="626.00,748.87 690.00,748.84 754.00,677.63 818.00,677.44 882.00,678.11 946.00,661.87 1010.00,649.64 1074.00,637.38"/>
-<circle cx="626.00" cy="748.87" r="3.0" fill="#2ec4b6" stroke="#09111b" stroke-width="1.0"/>
-<circle cx="690.00" cy="748.84" r="3.0" fill="#2ec4b6" stroke="#09111b" stroke-width="1.0"/>
-<circle cx="754.00" cy="677.63" r="3.0" fill="#2ec4b6" stroke="#09111b" stroke-width="1.0"/>
-<circle cx="818.00" cy="677.44" r="3.0" fill="#2ec4b6" stroke="#09111b" stroke-width="1.0"/>
-<circle cx="882.00" cy="678.11" r="3.0" fill="#2ec4b6" stroke="#09111b" stroke-width="1.0"/>
-<circle cx="946.00" cy="661.87" r="3.0" fill="#2ec4b6" stroke="#09111b" stroke-width="1.0"/>
-<circle cx="1010.00" cy="649.64" r="3.0" fill="#2ec4b6" stroke="#09111b" stroke-width="1.0"/>
-<circle cx="1074.00" cy="637.38" r="4.5" fill="#2ec4b6" stroke="#ffffff" stroke-width="1.5"/>
+<text class="axis-label" x="580" y="628.00">0.76265</text>
+<polyline fill="none" stroke="#2ec4b6" stroke-width="3" points="626.00,749.42 682.00,749.39 738.00,682.48 794.00,682.30 850.00,682.93 906.00,667.67 962.00,656.17 1018.00,644.65 1074.00,637.44"/>
+<circle cx="626.00" cy="749.42" r="3.0" fill="#2ec4b6" stroke="#09111b" stroke-width="1.0"/>
+<circle cx="682.00" cy="749.39" r="3.0" fill="#2ec4b6" stroke="#09111b" stroke-width="1.0"/>
+<circle cx="738.00" cy="682.48" r="3.0" fill="#2ec4b6" stroke="#09111b" stroke-width="1.0"/>
+<circle cx="794.00" cy="682.30" r="3.0" fill="#2ec4b6" stroke="#09111b" stroke-width="1.0"/>
+<circle cx="850.00" cy="682.93" r="3.0" fill="#2ec4b6" stroke="#09111b" stroke-width="1.0"/>
+<circle cx="906.00" cy="667.67" r="3.0" fill="#2ec4b6" stroke="#09111b" stroke-width="1.0"/>
+<circle cx="962.00" cy="656.17" r="3.0" fill="#2ec4b6" stroke="#09111b" stroke-width="1.0"/>
+<circle cx="1018.00" cy="644.65" r="3.0" fill="#2ec4b6" stroke="#09111b" stroke-width="1.0"/>
+<circle cx="1074.00" cy="637.44" r="4.5" fill="#2ec4b6" stroke="#ffffff" stroke-width="1.5"/>
 <text class="axis-label" x="626" y="784">oldest</text>
 <text class="axis-label" x="1074" y="784" text-anchor="end">latest</text>
 </g>
 <g>
 <rect x="28" y="820" width="520" height="220" rx="18" fill="#0f1b2b" stroke="#1d3148" stroke-width="1"/>
 <text class="panel-title" x="46" y="848">Cached Decode</text>
-<text class="panel-meta" x="46" y="864">latest 0.59878 tok/s   best 0.59878 tok/s</text>
-<text class="panel-meta" x="530" y="848" text-anchor="end">c4e45fa</text>
-<text class="panel-meta" x="530" y="864" text-anchor="end">2026-04-21T14:41:57.327290+00:00</text>
+<text class="panel-meta" x="46" y="864">latest 0.64367 tok/s   best 0.64367 tok/s</text>
+<text class="panel-meta" x="530" y="848" text-anchor="end">0b22f76</text>
+<text class="panel-meta" x="530" y="864" text-anchor="end">2026-04-21T16:08:47.061448+00:00</text>
 <line x1="82" y1="1002.00" x2="530" y2="1002.00" stroke="#1d3148" stroke-width="1"/>
 <text class="axis-label" x="36" y="1006.00">0.00000</text>
 <line x1="82" y1="968.50" x2="530" y2="968.50" stroke="#1d3148" stroke-width="1"/>
-<text class="axis-label" x="36" y="972.50">0.16631</text>
+<text class="axis-label" x="36" y="972.50">0.17888</text>
 <line x1="82" y1="935.00" x2="530" y2="935.00" stroke="#1d3148" stroke-width="1"/>
-<text class="axis-label" x="36" y="939.00">0.33263</text>
+<text class="axis-label" x="36" y="939.00">0.35776</text>
 <line x1="82" y1="901.50" x2="530" y2="901.50" stroke="#1d3148" stroke-width="1"/>
-<text class="axis-label" x="36" y="905.50">0.49894</text>
+<text class="axis-label" x="36" y="905.50">0.53665</text>
 <line x1="82" y1="868.00" x2="530" y2="868.00" stroke="#1d3148" stroke-width="1"/>
-<text class="axis-label" x="36" y="872.00">0.66525</text>
-<polyline fill="none" stroke="#3a86ff" stroke-width="3" points="82.00,992.43 146.00,992.96 210.00,920.21 274.00,920.04 338.00,934.80 402.00,904.10 466.00,892.68 530.00,881.39"/>
-<circle cx="82.00" cy="992.43" r="3.0" fill="#3a86ff" stroke="#09111b" stroke-width="1.0"/>
-<circle cx="146.00" cy="992.96" r="3.0" fill="#3a86ff" stroke="#09111b" stroke-width="1.0"/>
-<circle cx="210.00" cy="920.21" r="3.0" fill="#3a86ff" stroke="#09111b" stroke-width="1.0"/>
-<circle cx="274.00" cy="920.04" r="3.0" fill="#3a86ff" stroke="#09111b" stroke-width="1.0"/>
-<circle cx="338.00" cy="934.80" r="3.0" fill="#3a86ff" stroke="#09111b" stroke-width="1.0"/>
-<circle cx="402.00" cy="904.10" r="3.0" fill="#3a86ff" stroke="#09111b" stroke-width="1.0"/>
-<circle cx="466.00" cy="892.68" r="3.0" fill="#3a86ff" stroke="#09111b" stroke-width="1.0"/>
-<circle cx="530.00" cy="881.39" r="4.5" fill="#3a86ff" stroke="#ffffff" stroke-width="1.5"/>
+<text class="axis-label" x="36" y="872.00">0.71553</text>
+<polyline fill="none" stroke="#3a86ff" stroke-width="3" points="82.00,993.11 138.00,993.60 194.00,925.96 250.00,925.80 306.00,939.52 362.00,910.98 418.00,900.36 474.00,889.86 530.00,881.46"/>
+<circle cx="82.00" cy="993.11" r="3.0" fill="#3a86ff" stroke="#09111b" stroke-width="1.0"/>
+<circle cx="138.00" cy="993.60" r="3.0" fill="#3a86ff" stroke="#09111b" stroke-width="1.0"/>
+<circle cx="194.00" cy="925.96" r="3.0" fill="#3a86ff" stroke="#09111b" stroke-width="1.0"/>
+<circle cx="250.00" cy="925.80" r="3.0" fill="#3a86ff" stroke="#09111b" stroke-width="1.0"/>
+<circle cx="306.00" cy="939.52" r="3.0" fill="#3a86ff" stroke="#09111b" stroke-width="1.0"/>
+<circle cx="362.00" cy="910.98" r="3.0" fill="#3a86ff" stroke="#09111b" stroke-width="1.0"/>
+<circle cx="418.00" cy="900.36" r="3.0" fill="#3a86ff" stroke="#09111b" stroke-width="1.0"/>
+<circle cx="474.00" cy="889.86" r="3.0" fill="#3a86ff" stroke="#09111b" stroke-width="1.0"/>
+<circle cx="530.00" cy="881.46" r="4.5" fill="#3a86ff" stroke="#ffffff" stroke-width="1.5"/>
 <text class="axis-label" x="82" y="1028">oldest</text>
 <text class="axis-label" x="530" y="1028" text-anchor="end">latest</text>
 </g>
