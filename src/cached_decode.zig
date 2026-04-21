@@ -858,13 +858,30 @@ fn runFfn(
         const expert_weight = scratch.selected_weights[slot];
 
         try projectExpertUpGate(
+            backend,
             weights.up_exps,
             weights.gate_exps,
             expert_idx,
             input,
             expert_ff,
+            scratch.expert1[0..expert_ff],
             scratch.expert0[0..expert_ff],
         );
+
+        if (backend) |metal| {
+            if (try metal.projectRowRange(
+                weights.down_exps,
+                scratch.expert0[0..expert_ff],
+                expertBaseRow(weights.down_exps, expert_idx),
+                embd,
+                scratch.wide2[0..embd],
+            )) {
+                for (0..embd) |row_idx| {
+                    out_hidden[row_idx] += expert_weight * scratch.wide2[row_idx];
+                }
+                continue;
+            }
+        }
 
         for (0..embd) |row_idx| {
             const down_row = expertRowIndex(weights.down_exps, row_idx, expert_idx);
@@ -877,12 +894,28 @@ fn runFfn(
 
     const shared_gate = sigmoid(try weights.gate_inp_shexp.dotRow(0, input));
     try projectSharedExpert(
+        backend,
         weights.up_shexp,
         weights.gate_shexp,
         input,
         shared_ff,
+        scratch.expert0[0..shared_ff],
         scratch.expert1[0..shared_ff],
     );
+
+    if (backend) |metal| {
+        if (try metal.projectAllRows(
+            weights.down_shexp,
+            scratch.expert1[0..shared_ff],
+            scratch.wide2[0..embd],
+        )) {
+            for (0..embd) |row_idx| {
+                out_hidden[row_idx] += shared_gate * scratch.wide2[row_idx];
+            }
+            return;
+        }
+    }
+
     for (0..embd) |row_idx| {
         out_hidden[row_idx] += shared_gate * try weights.down_shexp.dotRow(
             row_idx,
@@ -1100,14 +1133,30 @@ fn projectQAndGate(
 }
 
 fn projectExpertUpGate(
+    backend: ?*metal_backend.Backend,
     up_tensor: gguf_store.TensorView,
     gate_tensor: gguf_store.TensorView,
     expert_idx: usize,
     input: []const f32,
     expert_ff: usize,
+    gate_tmp: []f32,
     out: []f32,
 ) !void {
     if (out.len < expert_ff) return error.OutputBufferTooSmall;
+    if (gate_tmp.len < expert_ff) return error.OutputBufferTooSmall;
+
+    if (backend) |metal| {
+        const base_row = expertBaseRow(up_tensor, expert_idx);
+        const up_ok = try metal.projectRowRange(up_tensor, input, base_row, expert_ff, out);
+        const gate_ok = try metal.projectRowRange(gate_tensor, input, base_row, expert_ff, gate_tmp);
+        if (up_ok and gate_ok) {
+            for (0..expert_ff) |row_idx| {
+                out[row_idx] = silu(gate_tmp[row_idx]) * out[row_idx];
+            }
+            return;
+        }
+    }
+
     for (0..expert_ff) |row_idx| {
         const expert_row = expertRowIndex(up_tensor, row_idx, expert_idx);
         const gate_row = expertRowIndex(gate_tensor, row_idx, expert_idx);
@@ -1118,13 +1167,28 @@ fn projectExpertUpGate(
 }
 
 fn projectSharedExpert(
+    backend: ?*metal_backend.Backend,
     up_tensor: gguf_store.TensorView,
     gate_tensor: gguf_store.TensorView,
     input: []const f32,
     expert_ff: usize,
+    gate_tmp: []f32,
     out: []f32,
 ) !void {
     if (out.len < expert_ff) return error.OutputBufferTooSmall;
+    if (gate_tmp.len < expert_ff) return error.OutputBufferTooSmall;
+
+    if (backend) |metal| {
+        const up_ok = try metal.projectAllRows(up_tensor, input, out);
+        const gate_ok = try metal.projectAllRows(gate_tensor, input, gate_tmp);
+        if (up_ok and gate_ok) {
+            for (0..expert_ff) |row_idx| {
+                out[row_idx] = silu(gate_tmp[row_idx]) * out[row_idx];
+            }
+            return;
+        }
+    }
+
     for (0..expert_ff) |row_idx| {
         const up_value = try up_tensor.dotRow(row_idx, input);
         const gate_value = try gate_tensor.dotRow(row_idx, input);
@@ -1140,6 +1204,15 @@ fn expertRowIndex(
     std.debug.assert(tensor.info.dimensions.len >= 3);
     const rows_per_expert = @as(usize, @intCast(tensor.info.dimensions[1]));
     return expert_idx * rows_per_expert + row_idx;
+}
+
+fn expertBaseRow(
+    tensor: gguf_store.TensorView,
+    expert_idx: usize,
+) usize {
+    std.debug.assert(tensor.info.dimensions.len >= 3);
+    const rows_per_expert = @as(usize, @intCast(tensor.info.dimensions[1]));
+    return expert_idx * rows_per_expert;
 }
 
 fn l2NormalizeHeadsInPlace(

@@ -11,6 +11,7 @@ pub const Backend = struct {
     max_cache_bytes: usize,
     cache_bytes: usize,
     ctx: ?metal_runtime.DenseContext,
+    matrix_buffer: ?metal_runtime.DenseBuffer,
     input_buffer: ?metal_runtime.DenseBuffer,
     output_buffer: ?metal_runtime.DenseBuffer,
     caches: std.ArrayList(CacheEntry),
@@ -26,6 +27,7 @@ pub const Backend = struct {
                 .max_cache_bytes = max_cache_bytes,
                 .cache_bytes = 0,
                 .ctx = null,
+                .matrix_buffer = null,
                 .input_buffer = null,
                 .output_buffer = null,
                 .caches = .empty,
@@ -38,6 +40,7 @@ pub const Backend = struct {
             .max_cache_bytes = max_cache_bytes,
             .cache_bytes = 0,
             .ctx = try metal_runtime.DenseContext.init(),
+            .matrix_buffer = null,
             .input_buffer = null,
             .output_buffer = null,
             .caches = .empty,
@@ -54,6 +57,7 @@ pub const Backend = struct {
         self.caches.deinit(self.allocator);
 
         if (self.ctx) |*ctx| {
+            if (self.matrix_buffer) |*buffer| ctx.releaseBuffer(buffer);
             if (self.input_buffer) |*buffer| ctx.releaseBuffer(buffer);
             if (self.output_buffer) |*buffer| ctx.releaseBuffer(buffer);
             ctx.deinit();
@@ -84,6 +88,47 @@ pub const Backend = struct {
         return true;
     }
 
+    pub fn projectRowRange(
+        self: *Backend,
+        tensor: gguf_store.TensorView,
+        input: []const f32,
+        row_start: usize,
+        row_count: usize,
+        out: []f32,
+    ) !bool {
+        if (!self.enabled or self.ctx == null) return false;
+        if (row_start > tensor.row_count or row_count > tensor.row_count - row_start) {
+            return error.RowIndexOutOfRange;
+        }
+        if (input.len != tensor.row_len) return error.InvalidInputBuffer;
+        if (out.len < row_count) return error.OutputBufferTooSmall;
+
+        try self.ensureBuffers(tensor.row_len, row_count);
+        try self.ensureMatrixBuffer(row_count * tensor.row_len);
+
+        const matrix_buffer = &self.matrix_buffer.?;
+        for (0..row_count) |row_offset| {
+            const start = row_offset * tensor.row_len;
+            try tensor.dequantizeRow(
+                row_start + row_offset,
+                matrix_buffer.floats[start .. start + tensor.row_len],
+            );
+        }
+
+        const input_buffer = &self.input_buffer.?;
+        const output_buffer = &self.output_buffer.?;
+        @memcpy(input_buffer.floats[0..tensor.row_len], input);
+        try self.ctx.?.matvec(
+            matrix_buffer,
+            input_buffer,
+            output_buffer,
+            row_count,
+            tensor.row_len,
+        );
+        @memcpy(out[0..row_count], output_buffer.floats[0..row_count]);
+        return true;
+    }
+
     fn ensureBuffers(self: *Backend, input_len: usize, output_len: usize) !void {
         const ctx = &(self.ctx orelse return error.UnsupportedPlatform);
 
@@ -105,6 +150,20 @@ pub const Backend = struct {
         }
         if (self.output_buffer == null) {
             self.output_buffer = try ctx.allocBuffer(output_len);
+        }
+    }
+
+    fn ensureMatrixBuffer(self: *Backend, element_count: usize) !void {
+        const ctx = &(self.ctx orelse return error.UnsupportedPlatform);
+
+        if (self.matrix_buffer) |*buffer| {
+            if (buffer.len < element_count) {
+                ctx.releaseBuffer(buffer);
+                self.matrix_buffer = null;
+            }
+        }
+        if (self.matrix_buffer == null) {
+            self.matrix_buffer = try ctx.allocBuffer(element_count);
         }
     }
 
@@ -170,5 +229,8 @@ fn shouldCacheTensor(tensor: gguf_store.TensorView) bool {
         std.mem.endsWith(u8, name, ".attn_k.weight") or
         std.mem.endsWith(u8, name, ".attn_v.weight") or
         std.mem.endsWith(u8, name, ".attn_output.weight") or
-        std.mem.endsWith(u8, name, ".ffn_gate_inp.weight");
+        std.mem.endsWith(u8, name, ".ffn_gate_inp.weight") or
+        std.mem.endsWith(u8, name, ".ffn_up_shexp.weight") or
+        std.mem.endsWith(u8, name, ".ffn_gate_shexp.weight") or
+        std.mem.endsWith(u8, name, ".ffn_down_shexp.weight");
 }
