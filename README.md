@@ -182,6 +182,145 @@ Tests:
 uv run pytest tests/ -v
 ```
 
+## Zig Baseline
+
+There is now a separate Zig baseline for plain generation in
+[`ZIG_BASELINE.md`](ZIG_BASELINE.md).
+
+The default `zig build` target is now pure Zig and dependency-free. It parses
+GGUF model metadata directly, mmaps the GGUF tensor payload, decodes native
+`f32`, `q4_K`, and `q6_K` rows, and runs fused row-dot / matvec kernels
+without `llama.cpp` or `ggml`.
+
+It now also runs a full fresh-token forward pass over the real Qwen3.6 GGUF:
+
+- recurrent DeltaNet blocks with zero recurrent state
+- full-attention blocks in the exact one-token / zero-history case
+- routed MoE FFN plus shared expert
+- final logits-head scan
+
+It also now runs repeated-token cached decode in pure Zig with:
+
+- recurrent DeltaNet state updates
+- recurrent convolution history
+- full-attention KV caches
+- exact IMRoPE text positions for Qwen35MoE full-attention layers
+
+Current real native baseline on this M2 Max:
+
+- `0.0483` fresh-token passes/s on `Qwen-Qwen3.6-35B-A3B-Q4_K_M.gguf`
+- measured with `--full-token-pass --token-id 42 --bench --bench-iters 2 --bench-warmup 1`
+- `0.0463` cached decode tok/s on the same GGUF
+- measured with `--cached-decode --token-id 42 --bench --bench-iters 2 --bench-warmup 1`
+
+That is an honest pure-Zig full-model one-token baseline, but it is still
+tokenizer-free. The cached benchmark feeds a repeated token id so the model
+state is real while the prompt path stays out of the way until the tokenizer
+layer lands.
+
+## Zig Experiment Loop
+
+There is now a dedicated autoresearch-style loop for the pure-Zig path:
+
+- [program.md](program.md) defines the optimization workflow
+- `experiments/results.csv` stores benchmark history
+- `experiments/summary.md` is regenerated from the CSV
+- `experiments/results.svg` is regenerated from the CSV after every run
+
+Canonical command:
+
+```bash
+python3 scripts/zig_autoresearch.py --profile full --notes "baseline before simd"
+```
+
+Faster profiles:
+
+```bash
+python3 scripts/zig_autoresearch.py --profile decode --notes "decode-only check"
+python3 scripts/zig_autoresearch.py --profile micro --notes "kernel-only check"
+```
+
+Rebuild the summary and plot without running the benchmarks again:
+
+```bash
+python3 scripts/zig_autoresearch.py --reports-only
+```
+
+Current pure-Zig validation commands:
+
+```bash
+zig build run -- \
+    --model models/qwen3.6-35b-a3b-q4km/Qwen-Qwen3.6-35B-A3B-Q4_K_M.gguf \
+    --tensor token_embd.weight \
+    --row-index 0 \
+    --value-limit 8
+
+zig build run -- \
+    --model models/qwen3.6-35b-a3b-q4km/Qwen-Qwen3.6-35B-A3B-Q4_K_M.gguf \
+    --tensor output.weight \
+    --row-index 0 \
+    --value-limit 8
+
+zig build run -- \
+    --model models/qwen3.6-35b-a3b-q4km/Qwen-Qwen3.6-35B-A3B-Q4_K_M.gguf \
+    --tensor output.weight \
+    --matvec \
+    --bench \
+    --bench-rows 248320 \
+    --bench-iters 1 \
+    --bench-warmup 0
+
+zig build run -- \
+    --model models/qwen3.6-35b-a3b-q4km/Qwen-Qwen3.6-35B-A3B-Q4_K_M.gguf \
+    --token-id 42 \
+    --norm-tensor blk.0.attn_norm.weight \
+    --project-tensor blk.0.attn_qkv.weight \
+    --bench \
+    --bench-rows 8192 \
+    --bench-iters 8 \
+    --bench-warmup 1
+
+zig build run -- \
+    --model models/qwen3.6-35b-a3b-q4km/Qwen-Qwen3.6-35B-A3B-Q4_K_M.gguf \
+    --full-token-pass \
+    --token-id 42 \
+    --value-limit 8
+
+zig build run -- \
+    --model models/qwen3.6-35b-a3b-q4km/Qwen-Qwen3.6-35B-A3B-Q4_K_M.gguf \
+    --full-token-pass \
+    --token-id 42 \
+    --bench \
+    --bench-iters 2 \
+    --bench-warmup 1
+
+zig build run -- \
+    --model models/qwen3.6-35b-a3b-q4km/Qwen-Qwen3.6-35B-A3B-Q4_K_M.gguf \
+    --cached-decode \
+    --token-id 42 \
+    --decode-steps 2 \
+    --value-limit 8
+
+zig build run -- \
+    --model models/qwen3.6-35b-a3b-q4km/Qwen-Qwen3.6-35B-A3B-Q4_K_M.gguf \
+    --cached-decode \
+    --token-id 42 \
+    --bench \
+    --bench-iters 2 \
+    --bench-warmup 1
+```
+
+The port order on this branch is now:
+
+1. pure-Zig GGUF, tensor loading, core quant kernels, and matvec
+2. pure-Zig plain generation
+3. DFlash
+4. DTree
+
+The old `llama.cpp`-backed runner is still available only as an optional
+bootstrap build for short validation while the native Zig runtime is being
+ported.
+
 ## Notes
 
 - `dtree-mlx-compare` alternates DFlash/DTree order across prompts.

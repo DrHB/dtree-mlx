@@ -10,3 +10,8 @@ build/
 marketing/
 benchmarks/metrics_history.csv
 .pytest_cache/
+models/
+.zig-cache/
+zig-cache/
+zig-out/
+experiments/runs/

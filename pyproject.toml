@@ -45,6 +45,7 @@ Issues = "https://github.com/DrHB/dtree-mlx/issues"
 dtree-mlx = "dtree_mlx.cli:main"
 dtree-mlx-bench = "dtree_mlx.benchmark_cli:main"
 dtree-mlx-compare = "dtree_mlx.compare_cli:main"
+dtree-mlx-zig-exp = "dtree_mlx.zig_autoresearch:main"
 
 [tool.setuptools.packages.find]
 include = ["dtree_mlx*"]

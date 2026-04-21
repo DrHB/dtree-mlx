@@ -1,0 +1,120 @@
+from __future__ import annotations
+
+from dtree_mlx.zig_autoresearch import (
+    build_suite_specs,
+    parse_key_value_output,
+    render_summary,
+    render_svg,
+)
+
+
+def test_parse_key_value_output_extracts_numeric_metrics():
+    stdout = """
+Cached decode benchmark
+elapsed_s: 43.155244
+cached_decode_tok_per_s: 0.04634430985953873
+checksum: 86.02596092224121
+note: benchmark
+"""
+
+    metrics = parse_key_value_output(stdout)
+
+    assert metrics["elapsed_s"] == 43.155244
+    assert metrics["cached_decode_tok_per_s"] == 0.04634430985953873
+    assert metrics["checksum"] == 86.02596092224121
+    assert metrics["note"] == "benchmark"
+
+
+def test_build_suite_specs_respects_profiles():
+    assert [spec.name for spec in build_suite_specs("model.gguf", 42, "micro")] == [
+        "logits_matvec",
+        "blk0_qkv_projection",
+    ]
+    assert [spec.name for spec in build_suite_specs("model.gguf", 42, "decode")] == [
+        "full_token_pass",
+        "cached_decode",
+    ]
+    assert [spec.name for spec in build_suite_specs("model.gguf", 42, "full")] == [
+        "logits_matvec",
+        "blk0_qkv_projection",
+        "full_token_pass",
+        "cached_decode",
+    ]
+
+
+def test_render_summary_and_svg_include_latest_metrics():
+    rows = [
+        {
+            "timestamp_utc": "2026-04-21T12:00:00+00:00",
+            "run_id": "run-a",
+            "profile": "full",
+            "label": "baseline",
+            "notes": "baseline",
+            "suite": "cached_decode",
+            "suite_title": "Cached Decode",
+            "metric_key": "cached_decode_tok_per_s",
+            "metric_value": 0.04,
+            "metric_unit": "tok/s",
+            "git_branch": "codex/zig",
+            "git_short_commit": "aaaa111",
+            "git_dirty": False,
+            "git_subject": "baseline",
+        },
+        {
+            "timestamp_utc": "2026-04-21T12:00:00+00:00",
+            "run_id": "run-a",
+            "profile": "full",
+            "label": "baseline",
+            "notes": "baseline",
+            "suite": "full_token_pass",
+            "suite_title": "Fresh Full Token Pass",
+            "metric_key": "fresh_token_tok_per_s",
+            "metric_value": 0.05,
+            "metric_unit": "tok/s",
+            "git_branch": "codex/zig",
+            "git_short_commit": "aaaa111",
+            "git_dirty": False,
+            "git_subject": "baseline",
+        },
+        {
+            "timestamp_utc": "2026-04-21T13:00:00+00:00",
+            "run_id": "run-b",
+            "profile": "full",
+            "label": "simd q6",
+            "notes": "simd q6",
+            "suite": "cached_decode",
+            "suite_title": "Cached Decode",
+            "metric_key": "cached_decode_tok_per_s",
+            "metric_value": 0.06,
+            "metric_unit": "tok/s",
+            "git_branch": "codex/zig",
+            "git_short_commit": "bbbb222",
+            "git_dirty": False,
+            "git_subject": "simd q6",
+        },
+        {
+            "timestamp_utc": "2026-04-21T13:00:00+00:00",
+            "run_id": "run-b",
+            "profile": "full",
+            "label": "simd q6",
+            "notes": "simd q6",
+            "suite": "full_token_pass",
+            "suite_title": "Fresh Full Token Pass",
+            "metric_key": "fresh_token_tok_per_s",
+            "metric_value": 0.07,
+            "metric_unit": "tok/s",
+            "git_branch": "codex/zig",
+            "git_short_commit": "bbbb222",
+            "git_dirty": False,
+            "git_subject": "simd q6",
+        },
+    ]
+
+    summary = render_summary(rows)
+    svg = render_svg(rows)
+
+    assert "Latest Run" in summary
+    assert "simd q6" in summary
+    assert "+0.02000" in summary
+    assert "Cached Decode" in svg
+    assert "Pure-Zig Optimization History" in svg
