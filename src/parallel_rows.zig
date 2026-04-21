@@ -2,7 +2,7 @@ const std = @import("std");
 const gguf_store = @import("gguf_store.zig");
 
 const max_parallel_workers: usize = 16;
-const min_rows_per_worker: usize = 4096;
+const min_rows_per_worker: usize = 2048;
 
 pub const ArgmaxResult = struct {
     row_index: usize,
