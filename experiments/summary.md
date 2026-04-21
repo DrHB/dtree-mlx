@@ -4,20 +4,20 @@ This file is generated from `experiments/results.csv`.
 
 ## Latest Run
 
-- Run: `20260421T142012.280840Z-d17380f-decode`
-- Time: `2026-04-21T14:20:12.280840+00:00`
-- Commit: `d17380f` on `codex/zig-baseline-qwen36`
+- Run: `20260421T142203.570145Z-333098c-decode`
+- Time: `2026-04-21T14:22:03.570145+00:00`
+- Commit: `333098c` on `codex/zig-baseline-qwen36`
 - Dirty tree: `False`
-- Subject: r001: force releasefast benchmark path
-- Label: r001
-- Notes: force releasefast benchmark path
+- Subject: r002: fix zig_round porcelain parser
+- Label: r002
+- Notes: fix zig_round porcelain parser
 
 ## Latest Metrics
 
 | Suite | Metric | Value | Delta vs previous same suite |
 |---|---|---:|---:|
-| Fresh Full Token Pass | `fresh_token_tok_per_s` | 0.43082 tok/s | +0.00102 |
-| Cached Decode | `cached_decode_tok_per_s` | 0.40690 tok/s | +0.00087 |
+| Fresh Full Token Pass | `fresh_token_tok_per_s` | 0.42725 tok/s | -0.00357 |
+| Cached Decode | `cached_decode_tok_per_s` | 0.33362 tok/s | -0.07328 |
 
 ## Best So Far
 
@@ -32,6 +32,7 @@ This file is generated from `experiments/results.csv`.
 
 | Run | Commit | Label | Cached tok/s | Fresh tok/s | QKV proj/s | Logits matvec/s |
 |---|---|---|---:|---:|---:|---:|
+| `20260421T142203.570145Z-333098c-decode` | `333098c` | r002 | 0.33362 | 0.42725 |  |  |
 | `20260421T142012.280840Z-d17380f-decode` | `d17380f` | r001 | 0.40690 | 0.43082 |  |  |
 | `20260421T142002.785445Z-11a5352-micro-dirty` | `11a5352` | releasefast harness sanity |  |  | 71.721 | 2.2272 |
 | `20260421T141730.141807Z-11a5352-decode-dirty` | `11a5352` | releasefast check | 0.40603 | 0.42981 |  |  |
