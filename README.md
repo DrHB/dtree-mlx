@@ -76,14 +76,26 @@ zig build run --release=fast -- \
   --bench-warmup 1
 ```
 
+Run the native Metal bootstrap on macOS:
+
+```bash
+zig build metal-bootstrap
+```
+
 ## Current Baseline
 
-Recorded pure-Zig baseline on this branch:
+Current tracked best on this branch:
 
-- `logits_matvec`: `0.18680` matvec/s
-- `blk0_qkv_projection`: `6.2632` projection/s
-- `full_token_pass`: `0.04881` tok/s
-- `cached_decode`: `0.04749` tok/s
+- `logits_matvec`: `15.475` matvec/s
+- `blk0_qkv_projection`: `138.39` projection/s
+- `full_token_pass`: `0.64510` tok/s
+- `cached_decode`: `0.59878` tok/s
+
+Native Metal status:
+
+- `zig build metal-bootstrap` now runs a tiny pure-Zig Metal compute pass on
+  macOS and validates the output.
+- This is a bring-up path only, not full-model inference yet.
 
 Those results are tracked in:
 
@@ -138,6 +150,8 @@ rules of the optimization loop.
 - [src/gguf_store.zig](src/gguf_store.zig): mmap tensor store
 - [src/quant.zig](src/quant.zig): quant decode + dot kernels
 - [src/ops.zig](src/ops.zig): shared math ops
+- [src/metal.zig](src/metal.zig): standalone Metal bootstrap executable
+- [src/metal/runtime.zig](src/metal/runtime.zig): native Zig Metal runtime bring-up
 - [src/single_token.zig](src/single_token.zig): fresh-token forward
 - [src/cached_decode.zig](src/cached_decode.zig): cached decode
 - [scripts/zig_autoresearch.py](scripts/zig_autoresearch.py): benchmark harness

@@ -25,14 +25,18 @@ The branch is still tokenizer-free. Current decode benchmarking uses a repeated
 token id so the model-state path is real while the text frontend stays out of
 the way until the tokenizer lands.
 
+The branch now also has a native Zig Metal bootstrap on macOS. It is not
+full-model inference yet, but it proves device discovery, shader compilation,
+pipeline creation, buffer upload, dispatch, and result validation from Zig.
+
 ## Current Baseline
 
-Latest recorded baseline in `experiments/results.csv`:
+Latest tracked best in `experiments/results.csv`:
 
-- logits head matvec: `0.18680` matvec/s
-- block 0 QKV projection: `6.2632` projection/s
-- fresh full-token pass: `0.04881` tok/s
-- cached decode: `0.04749` tok/s
+- logits head matvec: `15.475` matvec/s
+- block 0 QKV projection: `138.39` projection/s
+- fresh full-token pass: `0.64510` tok/s
+- cached decode: `0.59878` tok/s
 
 ## Commands
 
@@ -46,6 +50,12 @@ Build:
 
 ```bash
 zig build
+```
+
+Run the native Metal bootstrap:
+
+```bash
+zig build metal-bootstrap
 ```
 
 Inspect GGUF metadata:

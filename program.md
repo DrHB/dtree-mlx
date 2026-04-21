@@ -96,3 +96,31 @@ Optimize in this order:
 Primary objective:
 
 - beat the current branch baseline, not just change code
+
+## Current Best
+
+As of 2026-04-21 on this branch:
+
+- `cached_decode`: `0.59878 tok/s` at `c4e45fa` (`r005`)
+- `full_token_pass`: `0.64510 tok/s` at `c4e45fa` (`r005`)
+
+These numbers are still far from the earlier bootstrap reference of about
+`36.78 tok/s` on the same class of model using an external highly optimized
+runtime. That gap is large enough that CPU-only tuning is not expected to close
+it.
+
+## Two-Track Strategy
+
+Run two optimization tracks in parallel:
+
+1. CPU track:
+   keep improving `cached_decode` and `full_token_pass` with tracked rounds.
+2. Metal track:
+   start and iterate on a pure-native Zig Metal backend for macOS.
+
+Guidance:
+
+- CPU rounds should keep using `scripts/zig_round.py`.
+- Small CPU wins are still worth taking when they move `cached_decode`.
+- The path to tens of tok/s is expected to require the Metal track, not just
+  more CPU threading.
