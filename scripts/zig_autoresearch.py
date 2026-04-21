@@ -48,6 +48,7 @@ class SuiteSpec:
 SUITE_ORDER = [
     "metal_add_one",
     "metal_qkv_projection",
+    "metal_logits_projection",
     "logits_matvec",
     "blk0_qkv_projection",
     "full_token_pass",
@@ -190,6 +191,33 @@ def build_suite_specs(model: str, token_id: int, profile: str) -> list[SuiteSpec
                 ),
             ),
             (
+                "metal_logits_projection",
+                SuiteSpec(
+                    name="metal_logits_projection",
+                    title="Metal Logits Projection",
+                    metric_key="metal_projection_passes_per_s",
+                    unit="projection/s",
+                    color="#023e8a",
+                    command=[
+                        metal_binary,
+                        "--bench",
+                        "--bench-kind",
+                        "matvec",
+                        "--bench-iters",
+                        "10",
+                        "--bench-warmup",
+                        "3",
+                        "--rows",
+                        "248320",
+                        "--cols",
+                        "2048",
+                    ],
+                    bench_rows=248320,
+                    bench_iters=10,
+                    bench_warmup=3,
+                ),
+            ),
+            (
                 "logits_matvec",
                 SuiteSpec(
                     name="logits_matvec",
@@ -305,7 +333,7 @@ def build_suite_specs(model: str, token_id: int, profile: str) -> list[SuiteSpec
     elif profile == "decode":
         names = ["full_token_pass", "cached_decode"]
     elif profile == "metal":
-        names = ["metal_add_one", "metal_qkv_projection"]
+        names = ["metal_add_one", "metal_qkv_projection", "metal_logits_projection"]
     else:
         names = SUITE_ORDER
     return [specs[name] for name in names]
@@ -716,20 +744,21 @@ def render_summary(rows: list[dict[str, Any]]) -> str:
             "",
             "## Recent Runs",
             "",
-            "| Run | Commit | Label | Metal elems/s | Metal proj/s | Cached tok/s | Fresh tok/s | QKV proj/s | Logits matvec/s |",
-            "|---|---|---|---:|---:|---:|---:|---:|---:|",
+            "| Run | Commit | Label | Metal elems/s | Metal qkv/s | Metal logits/s | Cached tok/s | Fresh tok/s | QKV proj/s | Logits matvec/s |",
+            "|---|---|---|---:|---:|---:|---:|---:|---:|---:|",
         ]
     )
     for run in reversed(recent_runs):
         suites = run["suites"]
         label = run["label"] or run["notes"] or run["git_subject"] or ""
         lines.append(
-            "| `{run_id}` | `{commit}` | {label} | {metal} | {metal_proj} | {cached} | {fresh} | {qkv} | {matvec} |".format(
+            "| `{run_id}` | `{commit}` | {label} | {metal} | {metal_proj} | {metal_logits} | {cached} | {fresh} | {qkv} | {matvec} |".format(
                 run_id=run["run_id"],
                 commit=run["git_short_commit"],
                 label=label,
                 metal=table_metric(suites.get("metal_add_one")),
                 metal_proj=table_metric(suites.get("metal_qkv_projection")),
+                metal_logits=table_metric(suites.get("metal_logits_projection")),
                 cached=table_metric(suites.get("cached_decode")),
                 fresh=table_metric(suites.get("full_token_pass")),
                 qkv=table_metric(suites.get("blk0_qkv_projection")),
@@ -913,6 +942,7 @@ def suite_color(suite_name: str) -> str:
     colors = {
         "metal_add_one": "#00b4d8",
         "metal_qkv_projection": "#0077b6",
+        "metal_logits_projection": "#023e8a",
         "logits_matvec": "#ff6b6b",
         "blk0_qkv_projection": "#f7b801",
         "full_token_pass": "#2ec4b6",
