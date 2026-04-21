@@ -8,4 +8,3 @@ models/
 .zig-cache/
 zig-cache/
 zig-out/
-experiments/runs/

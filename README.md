@@ -95,7 +95,20 @@ Those results are tracked in:
 
 This branch uses a small autoresearch-style loop around the Zig binary.
 
-Canonical run:
+Canonical tracked round:
+
+```bash
+python3 scripts/zig_round.py --round-id r001 --notes "baseline before simd"
+```
+
+That command:
+
+- commits the code change
+- runs eval against that exact commit
+- commits the generated experiment artifacts
+- pushes the branch
+
+Primitive eval-only run:
 
 ```bash
 python3 scripts/zig_autoresearch.py --profile full --notes "baseline before simd"
@@ -128,4 +141,5 @@ rules of the optimization loop.
 - [src/single_token.zig](src/single_token.zig): fresh-token forward
 - [src/cached_decode.zig](src/cached_decode.zig): cached decode
 - [scripts/zig_autoresearch.py](scripts/zig_autoresearch.py): benchmark harness
+- [scripts/zig_round.py](scripts/zig_round.py): tracked experiment round runner
 - [ZIG_BASELINE.md](ZIG_BASELINE.md): port notes and commands

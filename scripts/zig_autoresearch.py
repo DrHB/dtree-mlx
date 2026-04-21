@@ -76,6 +76,11 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="Short free-form note describing the change being measured.",
     )
     parser.add_argument(
+        "--round-id",
+        default="",
+        help="Optional round identifier to record in the experiment artifacts.",
+    )
+    parser.add_argument(
         "--label",
         default="",
         help="Optional short label for the run. Falls back to notes, then the git subject.",
@@ -261,6 +266,7 @@ def main(argv: list[str] | None = None) -> None:
         **git_meta,
         "label": label,
         "notes": args.notes.strip(),
+        "round_id": args.round_id.strip(),
     }
     timestamp = meta["timestamp_utc"]
     run_id = make_run_id(timestamp, meta["git_short_commit"], args.profile, meta["git_dirty"])
@@ -283,6 +289,7 @@ def main(argv: list[str] | None = None) -> None:
             "timestamp_utc": timestamp,
             "run_id": run_id,
             "profile": args.profile,
+            "round_id": args.round_id.strip(),
             "label": label,
             "notes": args.notes.strip(),
             "suite": spec.name,
@@ -328,6 +335,7 @@ def main(argv: list[str] | None = None) -> None:
         args.runs_dir / f"{run_id}.json",
         {
             "run_id": run_id,
+            "round_id": args.round_id.strip(),
             "timestamp_utc": timestamp,
             "profile": args.profile,
             "label": label,
@@ -340,6 +348,10 @@ def main(argv: list[str] | None = None) -> None:
     )
     rebuild_reports(args.results_csv, args.summary_md, args.plot_svg)
 
+    if args.round_id.strip():
+        print(f"round_id: {args.round_id.strip()}")
+    print(f"tracked_git_commit: {meta['git_commit']}")
+    print(f"tracked_git_short_commit: {meta['git_short_commit']}")
     print(f"results_csv: {args.results_csv}")
     print(f"summary_md: {args.summary_md}")
     print(f"plot_svg: {args.plot_svg}")

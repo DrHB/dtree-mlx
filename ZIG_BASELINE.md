@@ -123,6 +123,12 @@ Rebuild experiment reports without rerunning the benchmarks:
 python3 scripts/zig_autoresearch.py --reports-only
 ```
 
+Run one fully tracked optimization round:
+
+```bash
+python3 scripts/zig_round.py --round-id r001 --notes "describe the change"
+```
+
 ## Next Optimization Order
 
 1. `cached_decode`

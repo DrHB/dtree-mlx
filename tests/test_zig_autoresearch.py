@@ -30,6 +30,21 @@ note: benchmark
     assert metrics["note"] == "benchmark"
 
 
+def test_default_round_messages_are_stable():
+    round_path = Path(__file__).resolve().parents[1] / "scripts" / "zig_round.py"
+    round_spec = importlib.util.spec_from_file_location("zig_round", round_path)
+    assert round_spec is not None and round_spec.loader is not None
+    round_module = importlib.util.module_from_spec(round_spec)
+    sys.modules[round_spec.name] = round_module
+    round_spec.loader.exec_module(round_module)
+
+    assert round_module.default_code_message("r007", "simd q6 dot") == "r007: simd q6 dot"
+    assert (
+        round_module.default_results_message("r007", "simd q6 dot", "abc1234")
+        == "r007 results: simd q6 dot [code abc1234]"
+    )
+
+
 def test_build_suite_specs_respects_profiles():
     assert [spec.name for spec in MODULE.build_suite_specs("model.gguf", 42, "micro")] == [
         "logits_matvec",
