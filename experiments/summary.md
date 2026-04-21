@@ -4,34 +4,37 @@ This file is generated from `experiments/results.csv`.
 
 ## Latest Run
 
-- Run: `20260421T142203.570145Z-333098c-decode`
-- Time: `2026-04-21T14:22:03.570145+00:00`
-- Commit: `333098c` on `codex/zig-baseline-qwen36`
+- Run: `20260421T143848.472187Z-573105b-full`
+- Time: `2026-04-21T14:38:48.472187+00:00`
+- Commit: `573105b` on `codex/zig-baseline-qwen36`
 - Dirty tree: `False`
-- Subject: r002: fix zig_round porcelain parser
-- Label: r002
-- Notes: fix zig_round porcelain parser
+- Subject: r003: parallel logits row sweeps
+- Label: r003
+- Notes: parallel logits row sweeps
 
 ## Latest Metrics
 
 | Suite | Metric | Value | Delta vs previous same suite |
 |---|---|---:|---:|
-| Fresh Full Token Pass | `fresh_token_tok_per_s` | 0.42725 tok/s | -0.00357 |
-| Cached Decode | `cached_decode_tok_per_s` | 0.33362 tok/s | -0.07328 |
+| Logits Head Matvec | `full_tensor_matvecs_per_s` | 15.475 matvec/s | +13.248 |
+| Block 0 QKV Projection | `full_projection_passes_per_s` | 138.39 projection/s | +66.666 |
+| Fresh Full Token Pass | `fresh_token_tok_per_s` | 0.51409 tok/s | +0.08684 |
+| Cached Decode | `cached_decode_tok_per_s` | 0.48605 tok/s | +0.15242 |
 
 ## Best So Far
 
 | Suite | Best | Commit | Time | Label |
 |---|---:|---|---|---|
-| Logits Head Matvec | 2.2272 matvec/s | `11a5352` | `2026-04-21T14:20:02.785445+00:00` | releasefast harness sanity |
-| Block 0 QKV Projection | 71.721 projection/s | `11a5352` | `2026-04-21T14:20:02.785445+00:00` | releasefast harness sanity |
-| Fresh Full Token Pass | 0.43082 tok/s | `d17380f` | `2026-04-21T14:20:12.280840+00:00` | r001 |
-| Cached Decode | 0.40690 tok/s | `d17380f` | `2026-04-21T14:20:12.280840+00:00` | r001 |
+| Logits Head Matvec | 15.475 matvec/s | `573105b` | `2026-04-21T14:38:48.472187+00:00` | r003 |
+| Block 0 QKV Projection | 138.39 projection/s | `573105b` | `2026-04-21T14:38:48.472187+00:00` | r003 |
+| Fresh Full Token Pass | 0.51409 tok/s | `573105b` | `2026-04-21T14:38:48.472187+00:00` | r003 |
+| Cached Decode | 0.48605 tok/s | `573105b` | `2026-04-21T14:38:48.472187+00:00` | r003 |
 
 ## Recent Runs
 
 | Run | Commit | Label | Cached tok/s | Fresh tok/s | QKV proj/s | Logits matvec/s |
 |---|---|---|---:|---:|---:|---:|
+| `20260421T143848.472187Z-573105b-full` | `573105b` | r003 | 0.48605 | 0.51409 | 138.39 | 15.475 |
 | `20260421T142203.570145Z-333098c-decode` | `333098c` | r002 | 0.33362 | 0.42725 |  |  |
 | `20260421T142012.280840Z-d17380f-decode` | `d17380f` | r001 | 0.40690 | 0.43082 |  |  |
 | `20260421T142002.785445Z-11a5352-micro-dirty` | `11a5352` | releasefast harness sanity |  |  | 71.721 | 2.2272 |
