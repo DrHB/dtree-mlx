@@ -8,7 +8,8 @@ const metal_path: []const u8 = "/System/Library/Frameworks/Metal.framework/Versi
 const foundation_path: []const u8 = "/System/Library/Frameworks/Foundation.framework/Versions/Current/Foundation";
 const libobjc_path: []const u8 = "/usr/lib/libobjc.A.dylib";
 
-const max_matvec_threadgroup_width: usize = 256;
+const matvec_threadgroup_width: usize = 128;
+const matvec_rows_per_group: usize = 4;
 
 const MetalSource =
     \\#include <metal_stdlib>
@@ -23,31 +24,37 @@ const MetalSource =
     \\                             device const float *vector [[buffer(1)]],
     \\                             device float *output [[buffer(2)]],
     \\                             constant uint &cols [[buffer(3)]],
-    \\                             uint2 gid [[thread_position_in_grid]],
-    \\                             uint lane [[thread_index_in_threadgroup]],
-    \\                             uint2 threads_per_group [[threads_per_threadgroup]]) {
-    \\    const uint row = gid.y;
-    \\    const uint group_width = threads_per_group.x;
-    \\    threadgroup float partials[256];
+    \\                             constant uint &rows [[buffer(4)]],
+    \\                             uint local_index [[thread_index_in_threadgroup]],
+    \\                             uint3 group_id [[threadgroup_position_in_grid]],
+    \\                             uint simd_group_index [[simdgroup_index_in_threadgroup]],
+    \\                             uint simd_lane [[thread_index_in_simdgroup]]) {
+    \\    threadgroup float vector_tile[128];
+    \\    const uint row = group_id.x * 4u + simd_group_index;
+    \\    const bool row_active = row < rows;
     \\
     \\    float acc = 0.0f;
-    \\    const uint base = row * cols;
-    \\    for (uint col = gid.x; col < cols; col += group_width) {
-    \\        acc = fma(matrix[base + col], vector[col], acc);
-    \\    }
+    \\    const uint row_base = row * cols;
+    \\    for (uint tile_base = 0; tile_base < cols; tile_base += 128u) {
+    \\        const uint global_col = tile_base + local_index;
+    \\        vector_tile[local_index] = global_col < cols ? vector[global_col] : 0.0f;
+    \\        threadgroup_barrier(mem_flags::mem_threadgroup);
     \\
-    \\    partials[lane] = acc;
-    \\    threadgroup_barrier(mem_flags::mem_threadgroup);
-    \\
-    \\    for (uint stride = group_width >> 1; stride > 0; stride >>= 1) {
-    \\        if (lane < stride) {
-    \\            partials[lane] += partials[lane + stride];
+    \\        if (row_active) {
+    \\            for (uint chunk = 0; chunk < 128u; chunk += 32u) {
+    \\                const uint tile_col = chunk + simd_lane;
+    \\                const uint col = tile_base + tile_col;
+    \\                if (col < cols) {
+    \\                    acc = fma(matrix[row_base + col], vector_tile[tile_col], acc);
+    \\                }
+    \\            }
     \\        }
     \\        threadgroup_barrier(mem_flags::mem_threadgroup);
     \\    }
     \\
-    \\    if (lane == 0) {
-    \\        output[row] = partials[0];
+    \\    acc = simd_sum(acc);
+    \\    if (simd_lane == 0u && row_active) {
+    \\        output[row] = acc;
     \\    }
     \\}
 ;
@@ -467,12 +474,14 @@ fn dispatchDenseMatVec(
     rows: usize,
     cols: usize,
 ) Error!void {
+    const rows_u32 = std.math.cast(u32, rows) orelse return error.InvalidRowCount;
     const cols_u32 = std.math.cast(u32, cols) orelse return error.InvalidColCount;
     const threadgroup_width = chooseMatVecThreadgroupWidth(
         pipeline.thread_execution_width,
         pipeline.max_total_threads_per_threadgroup,
         cols,
     );
+    const threadgroup_count = std.math.divCeil(usize, rows, matvec_rows_per_group) catch unreachable;
 
     const command_buffer = session.symbols.msg_send_id_0(session.queue, sel(&session.symbols, "commandBuffer")) orelse return error.CommandBufferCreationFailed;
     defer release(&session.symbols, command_buffer);
@@ -490,12 +499,19 @@ fn dispatchDenseMatVec(
         @sizeOf(u32),
         3,
     );
+    session.symbols.msg_send_void_ptr_usize_usize(
+        encoder,
+        sel(&session.symbols, "setBytes:length:atIndex:"),
+        @ptrCast(&rows_u32),
+        @sizeOf(u32),
+        4,
+    );
     session.symbols.msg_send_void_size_size(
         encoder,
-        sel(&session.symbols, "dispatchThreads:threadsPerThreadgroup:"),
+        sel(&session.symbols, "dispatchThreadgroups:threadsPerThreadgroup:"),
         .{
-            .width = threadgroup_width,
-            .height = rows,
+            .width = threadgroup_count,
+            .height = 1,
             .depth = 1,
         },
         .{
@@ -517,23 +533,9 @@ fn chooseThreadgroupWidth(thread_execution_width: usize, max_total_threads: usiz
 }
 
 fn chooseMatVecThreadgroupWidth(thread_execution_width: usize, max_total_threads: usize, cols: usize) usize {
-    const capped = @min(@min(@min(max_total_threads, max_matvec_threadgroup_width), cols), 128);
-    if (capped <= 1) return 1;
-
-    var candidate = highestPowerOfTwo(capped);
-    if (candidate < thread_execution_width and thread_execution_width <= capped) {
-        candidate = thread_execution_width;
-    }
-    return @max(candidate, 1);
-}
-
-fn highestPowerOfTwo(limit: usize) usize {
-    var value = limit;
-    var result: usize = 1;
-    while (value > 1) : (value >>= 1) {
-        result <<= 1;
-    }
-    return result;
+    _ = cols;
+    if (thread_execution_width > matvec_threadgroup_width) return thread_execution_width;
+    return @min(matvec_threadgroup_width, max_total_threads);
 }
 
 fn fillPattern(values: [*]f32, element_count: usize) void {
