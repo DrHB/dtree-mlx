@@ -618,10 +618,12 @@ pub const Engine = struct {
         const seq_len = self.position + 1;
 
         try projectQAndGate(
+            self.backend,
             weights.q_gate,
             input,
             num_heads,
             head_dim,
+            self.scratch.wide2[0 .. q_len * 2],
             self.scratch.wide0[0..q_len],
             self.scratch.wide1[0..q_len],
         );
@@ -1057,15 +1059,34 @@ fn scanProjectedOutput(
 }
 
 fn projectQAndGate(
+    backend: ?*metal_backend.Backend,
     tensor: gguf_store.TensorView,
     input: []const f32,
     num_heads: usize,
     head_dim: usize,
+    temp: []f32,
     q_out: []f32,
     gate_out: []f32,
 ) !void {
     const total = num_heads * head_dim;
     if (q_out.len < total or gate_out.len < total) return error.OutputBufferTooSmall;
+    if (temp.len < total * 2) return error.OutputBufferTooSmall;
+
+    if (backend) |metal| {
+        if (try metal.projectAllRows(tensor, input, temp[0 .. total * 2])) {
+            const stride = head_dim * 2;
+            for (0..num_heads) |head_idx| {
+                const base = head_idx * stride;
+                const out_idx = head_idx * head_dim;
+                @memcpy(q_out[out_idx .. out_idx + head_dim], temp[base .. base + head_dim]);
+                @memcpy(
+                    gate_out[out_idx .. out_idx + head_dim],
+                    temp[base + head_dim .. base + stride],
+                );
+            }
+            return;
+        }
+    }
 
     const stride = head_dim * 2;
     for (0..num_heads) |head_idx| {

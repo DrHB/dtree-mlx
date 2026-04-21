@@ -159,5 +159,16 @@ fn shouldCacheTensor(tensor: gguf_store.TensorView) bool {
     if (tensor.row_count == 0 or tensor.row_len == 0) return false;
 
     const name = tensor.info.name;
-    return std.mem.eql(u8, name, "output.weight");
+    if (std.mem.eql(u8, name, "output.weight")) return true;
+
+    return std.mem.endsWith(u8, name, ".attn_qkv.weight") or
+        std.mem.endsWith(u8, name, ".attn_gate.weight") or
+        std.mem.endsWith(u8, name, ".ssm_alpha.weight") or
+        std.mem.endsWith(u8, name, ".ssm_beta.weight") or
+        std.mem.endsWith(u8, name, ".ssm_out.weight") or
+        std.mem.endsWith(u8, name, ".attn_q.weight") or
+        std.mem.endsWith(u8, name, ".attn_k.weight") or
+        std.mem.endsWith(u8, name, ".attn_v.weight") or
+        std.mem.endsWith(u8, name, ".attn_output.weight") or
+        std.mem.endsWith(u8, name, ".ffn_gate_inp.weight");
 }

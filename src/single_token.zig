@@ -444,7 +444,15 @@ pub const Engine = struct {
         const gate_len = num_heads * head_dim;
         const v_len = num_kv_heads * head_dim;
 
-        try projectInterleavedGate(weights.q_gate, input, num_heads, head_dim, self.scratch.wide1[0..gate_len]);
+        try projectInterleavedGate(
+            self.backend,
+            weights.q_gate,
+            input,
+            num_heads,
+            head_dim,
+            self.scratch.wide2[0 .. gate_len * 2],
+            self.scratch.wide1[0..gate_len],
+        );
         try projectAllRows(self.backend, weights.v, input, self.scratch.wide2[0..v_len]);
 
         for (0..num_heads) |head_idx| {
@@ -651,13 +659,30 @@ fn scanProjectedOutput(
 }
 
 fn projectInterleavedGate(
+    backend: ?*metal_backend.Backend,
     tensor: gguf_store.TensorView,
     input: []const f32,
     num_heads: usize,
     head_dim: usize,
+    temp: []f32,
     out: []f32,
 ) !void {
-    if (out.len < num_heads * head_dim) return error.OutputBufferTooSmall;
+    const total = num_heads * head_dim;
+    if (out.len < total) return error.OutputBufferTooSmall;
+    if (temp.len < total * 2) return error.OutputBufferTooSmall;
+
+    if (backend) |metal| {
+        if (try metal.projectAllRows(tensor, input, temp[0 .. total * 2])) {
+            const stride = head_dim * 2;
+            for (0..num_heads) |head_idx| {
+                const base = head_idx * stride + head_dim;
+                const out_idx = head_idx * head_dim;
+                @memcpy(out[out_idx .. out_idx + head_dim], temp[base .. base + head_dim]);
+            }
+            return;
+        }
+    }
+
     const stride = head_dim * 2;
     for (0..num_heads) |head_idx| {
         for (0..head_dim) |dim_idx| {
