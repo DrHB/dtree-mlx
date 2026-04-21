@@ -1,0 +1,102 @@
+{
+  "build_optimize": "ReleaseFast",
+  "label": "r007",
+  "metadata": {
+    "build_optimize": "ReleaseFast",
+    "experiment_tag": "metal",
+    "git_branch": "codex/zig-baseline-qwen36",
+    "git_commit": "4b6c73329ab891b0b25757ab195bb641e883dadb",
+    "git_dirty": false,
+    "git_short_commit": "4b6c733",
+    "git_subject": "r007: add metal qkv projection kernel",
+    "hostname": "habibLM.local",
+    "label": "r007",
+    "notes": "add metal qkv projection kernel",
+    "platform": "macOS-26.3.1-x86_64-i386-64bit",
+    "python_version": "3.9.13",
+    "round_id": "r007",
+    "script_name": "zig_autoresearch.py",
+    "timestamp_utc": "2026-04-21T15:18:27.907314+00:00"
+  },
+  "model": "models/qwen3.6-35b-a3b-q4km/Qwen-Qwen3.6-35B-A3B-Q4_K_M.gguf",
+  "notes": "add metal qkv projection kernel",
+  "profile": "metal",
+  "round_id": "r007",
+  "run_id": "20260421T151827.907314Z-4b6c733-metal",
+  "steps": [
+    {
+      "command": [
+        "/Users/drhb/Documents/tmp/dtree-mlx/zig-out/bin/dtree-mlx-metal-bootstrap",
+        "--bench",
+        "--bench-iters",
+        "20",
+        "--bench-warmup",
+        "5",
+        "--elements",
+        "1048576"
+      ],
+      "metric_key": "metal_elements_per_s",
+      "metric_unit": "elements/s",
+      "metric_value": 2342401429.6883726,
+      "metrics": {
+        "bench_iters": 20,
+        "bench_warmup": 5,
+        "checksum": 157278801,
+        "device": "Apple M2 Max",
+        "elapsed_s": 0.008953,
+        "elements": 1048576,
+        "max_threads_per_threadgroup": 1024,
+        "metal_dispatches_per_s": 2233.8880822070814,
+        "metal_elements_per_s": 2342401429.6883726,
+        "note": "bootstrap bandwidth check only, not inference-shaped work.",
+        "thread_execution_width": 32
+      },
+      "returncode": 0,
+      "stderr": "",
+      "stdout": "Metal add-one benchmark\ndevice: Apple M2 Max\nthread_execution_width: 32\nmax_threads_per_threadgroup: 1024\nelements: 1048576\nbench_warmup: 5\nbench_iters: 20\nelapsed_s: 0.008953\nmetal_dispatches_per_s: 2233.8880822070814\nmetal_elements_per_s: 2342401429.6883726\nchecksum: 157278801\nnote: bootstrap bandwidth check only, not inference-shaped work.\n",
+      "suite": "metal_add_one",
+      "title": "Metal Add-One"
+    },
+    {
+      "command": [
+        "/Users/drhb/Documents/tmp/dtree-mlx/zig-out/bin/dtree-mlx-metal-bootstrap",
+        "--bench",
+        "--bench-kind",
+        "matvec",
+        "--bench-iters",
+        "20",
+        "--bench-warmup",
+        "5",
+        "--rows",
+        "8192",
+        "--cols",
+        "2048"
+      ],
+      "metric_key": "metal_projection_passes_per_s",
+      "metric_unit": "projection/s",
+      "metric_value": 1282.2978777970122,
+      "metrics": {
+        "bench_iters": 20,
+        "bench_warmup": 5,
+        "checksum": 6.845703125,
+        "cols": 2048,
+        "device": "Apple M2 Max",
+        "elapsed_s": 0.015597,
+        "max_threads_per_threadgroup": 1024,
+        "metal_matvec_gflops": 43.02677694428416,
+        "metal_matvec_output_rows_per_s": 10504584.214913124,
+        "metal_projection_passes_per_s": 1282.2978777970122,
+        "note": "this is the first inference-shaped native Zig Metal projection baseline.",
+        "rows": 8192,
+        "thread_execution_width": 32
+      },
+      "returncode": 0,
+      "stderr": "",
+      "stdout": "Metal dense matvec benchmark\ndevice: Apple M2 Max\nthread_execution_width: 32\nmax_threads_per_threadgroup: 1024\nrows: 8192\ncols: 2048\nbench_warmup: 5\nbench_iters: 20\nelapsed_s: 0.015597\nmetal_projection_passes_per_s: 1282.2978777970122\nmetal_matvec_output_rows_per_s: 10504584.214913124\nmetal_matvec_gflops: 43.02677694428416\nchecksum: 6.845703125\nnote: this is the first inference-shaped native Zig Metal projection baseline.\n",
+      "suite": "metal_qkv_projection",
+      "title": "Metal QKV Projection"
+    }
+  ],
+  "timestamp_utc": "2026-04-21T15:18:27.907314+00:00",
+  "token_id": 42
+}
