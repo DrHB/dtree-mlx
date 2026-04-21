@@ -1,0 +1,17 @@
+{
+  "baseline_run_id": "",
+  "branch": "codex/zig-baseline-qwen36",
+  "code_commit": "7931839b7ab7387d0f86bbc96c82bd1641852206",
+  "comparisons": [],
+  "decision": "accepted",
+  "gate_skipped": true,
+  "max_regression_pct": 5.0,
+  "notes": "trace harness and metal substrate split",
+  "profile": "tracked",
+  "regressions": [],
+  "round_id": "r015",
+  "run_backend": "",
+  "run_coverage": "",
+  "run_id": "20260421T203639.102422Z-7931839-tracked",
+  "trace_version": 1
+}

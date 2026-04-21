@@ -9,13 +9,13 @@ text { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; }
 .axis-label { fill: #7b8ba1; font-size: 11px; }
 </style>
 <text class="title" x="28" y="36">Pure-Zig Optimization History</text>
-<text class="muted" x="28" y="60">Generated from experiments/results.csv on 2026-04-21T17:14:45.237004+00:00</text>
+<text class="muted" x="28" y="60">Generated from experiments/results.csv on 2026-04-21T20:36:39.102422+00:00</text>
 <g>
 <rect x="28" y="88" width="520" height="220" rx="18" fill="#0f1b2b" stroke="#1d3148" stroke-width="1"/>
 <text class="panel-title" x="46" y="116">Metal Add-One</text>
-<text class="panel-meta" x="46" y="132">latest 3008826398.85 elements/s   best 4642798317.47 elements/s</text>
-<text class="panel-meta" x="530" y="116" text-anchor="end">4c0566e</text>
-<text class="panel-meta" x="530" y="132" text-anchor="end">2026-04-21T15:39:43.916627+00:00</text>
+<text class="panel-meta" x="46" y="132">latest 2470434680.17 elements/s   best 4642798317.47 elements/s</text>
+<text class="panel-meta" x="530" y="116" text-anchor="end">7931839</text>
+<text class="panel-meta" x="530" y="132" text-anchor="end">2026-04-21T20:36:39.102422+00:00</text>
 <line x1="82" y1="270.00" x2="530" y2="270.00" stroke="#1d3148" stroke-width="1"/>
 <text class="axis-label" x="36" y="274.00">2066353803.15</text>
 <line x1="82" y1="236.50" x2="530" y2="236.50" stroke="#1d3148" stroke-width="1"/>
@@ -26,173 +26,197 @@ text { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; }
 <text class="axis-label" x="36" y="173.50">4205722908.79</text>
 <line x1="82" y1="136.00" x2="530" y2="136.00" stroke="#1d3148" stroke-width="1"/>
 <text class="axis-label" x="36" y="140.00">4918845944.00</text>
-<polyline fill="none" stroke="#00b4d8" stroke-width="3" points="82.00,148.97 171.60,257.03 261.20,248.29 350.80,170.15 440.40,226.27 530.00,225.73"/>
+<polyline fill="none" stroke="#00b4d8" stroke-width="3" points="82.00,148.97 156.67,257.03 231.33,248.29 306.00,170.15 380.67,226.27 455.33,225.73 530.00,251.02"/>
 <circle cx="82.00" cy="148.97" r="3.0" fill="#00b4d8" stroke="#09111b" stroke-width="1.0"/>
-<circle cx="171.60" cy="257.03" r="3.0" fill="#00b4d8" stroke="#09111b" stroke-width="1.0"/>
-<circle cx="261.20" cy="248.29" r="3.0" fill="#00b4d8" stroke="#09111b" stroke-width="1.0"/>
-<circle cx="350.80" cy="170.15" r="3.0" fill="#00b4d8" stroke="#09111b" stroke-width="1.0"/>
-<circle cx="440.40" cy="226.27" r="3.0" fill="#00b4d8" stroke="#09111b" stroke-width="1.0"/>
-<circle cx="530.00" cy="225.73" r="4.5" fill="#00b4d8" stroke="#ffffff" stroke-width="1.5"/>
+<circle cx="156.67" cy="257.03" r="3.0" fill="#00b4d8" stroke="#09111b" stroke-width="1.0"/>
+<circle cx="231.33" cy="248.29" r="3.0" fill="#00b4d8" stroke="#09111b" stroke-width="1.0"/>
+<circle cx="306.00" cy="170.15" r="3.0" fill="#00b4d8" stroke="#09111b" stroke-width="1.0"/>
+<circle cx="380.67" cy="226.27" r="3.0" fill="#00b4d8" stroke="#09111b" stroke-width="1.0"/>
+<circle cx="455.33" cy="225.73" r="3.0" fill="#00b4d8" stroke="#09111b" stroke-width="1.0"/>
+<circle cx="530.00" cy="251.02" r="4.5" fill="#00b4d8" stroke="#ffffff" stroke-width="1.5"/>
 <text class="axis-label" x="82" y="296">oldest</text>
 <text class="axis-label" x="530" y="296" text-anchor="end">latest</text>
 </g>
 <g>
 <rect x="572" y="88" width="520" height="220" rx="18" fill="#0f1b2b" stroke="#1d3148" stroke-width="1"/>
 <text class="panel-title" x="590" y="116">Metal QKV Projection</text>
-<text class="panel-meta" x="590" y="132">latest 2262.96 projection/s   best 2262.96 projection/s</text>
-<text class="panel-meta" x="1074" y="116" text-anchor="end">4c0566e</text>
-<text class="panel-meta" x="1074" y="132" text-anchor="end">2026-04-21T15:39:43.916627+00:00</text>
+<text class="panel-meta" x="590" y="132">latest 1185.89 projection/s   best 2262.96 projection/s</text>
+<text class="panel-meta" x="1074" y="116" text-anchor="end">7931839</text>
+<text class="panel-meta" x="1074" y="132" text-anchor="end">2026-04-21T20:36:39.102422+00:00</text>
 <line x1="626" y1="270.00" x2="1074" y2="270.00" stroke="#1d3148" stroke-width="1"/>
-<text class="axis-label" x="580" y="274.00">1164.62</text>
+<text class="axis-label" x="580" y="274.00">1056.64</text>
 <line x1="626" y1="236.50" x2="1074" y2="236.50" stroke="#1d3148" stroke-width="1"/>
-<text class="axis-label" x="580" y="240.50">1468.62</text>
+<text class="axis-label" x="580" y="240.50">1390.53</text>
 <line x1="626" y1="203.00" x2="1074" y2="203.00" stroke="#1d3148" stroke-width="1"/>
-<text class="axis-label" x="580" y="207.00">1772.63</text>
+<text class="axis-label" x="580" y="207.00">1724.42</text>
 <line x1="626" y1="169.50" x2="1074" y2="169.50" stroke="#1d3148" stroke-width="1"/>
-<text class="axis-label" x="580" y="173.50">2076.63</text>
+<text class="axis-label" x="580" y="173.50">2058.31</text>
 <line x1="626" y1="136.00" x2="1074" y2="136.00" stroke="#1d3148" stroke-width="1"/>
-<text class="axis-label" x="580" y="140.00">2380.63</text>
-<polyline fill="none" stroke="#0077b6" stroke-width="3" points="626.00,257.03 738.00,220.62 850.00,212.95 962.00,181.71 1074.00,148.97"/>
-<circle cx="626.00" cy="257.03" r="3.0" fill="#0077b6" stroke="#09111b" stroke-width="1.0"/>
-<circle cx="738.00" cy="220.62" r="3.0" fill="#0077b6" stroke="#09111b" stroke-width="1.0"/>
-<circle cx="850.00" cy="212.95" r="3.0" fill="#0077b6" stroke="#09111b" stroke-width="1.0"/>
-<circle cx="962.00" cy="181.71" r="3.0" fill="#0077b6" stroke="#09111b" stroke-width="1.0"/>
-<circle cx="1074.00" cy="148.97" r="4.5" fill="#0077b6" stroke="#ffffff" stroke-width="1.5"/>
+<text class="axis-label" x="580" y="140.00">2392.20</text>
+<polyline fill="none" stroke="#0077b6" stroke-width="3" points="626.00,247.36 715.60,214.20 805.20,207.22 894.80,178.78 984.40,148.97 1074.00,257.03"/>
+<circle cx="626.00" cy="247.36" r="3.0" fill="#0077b6" stroke="#09111b" stroke-width="1.0"/>
+<circle cx="715.60" cy="214.20" r="3.0" fill="#0077b6" stroke="#09111b" stroke-width="1.0"/>
+<circle cx="805.20" cy="207.22" r="3.0" fill="#0077b6" stroke="#09111b" stroke-width="1.0"/>
+<circle cx="894.80" cy="178.78" r="3.0" fill="#0077b6" stroke="#09111b" stroke-width="1.0"/>
+<circle cx="984.40" cy="148.97" r="3.0" fill="#0077b6" stroke="#09111b" stroke-width="1.0"/>
+<circle cx="1074.00" cy="257.03" r="4.5" fill="#0077b6" stroke="#ffffff" stroke-width="1.5"/>
 <text class="axis-label" x="626" y="296">oldest</text>
 <text class="axis-label" x="1074" y="296" text-anchor="end">latest</text>
 </g>
 <g>
 <rect x="28" y="332" width="520" height="220" rx="18" fill="#0f1b2b" stroke="#1d3148" stroke-width="1"/>
 <text class="panel-title" x="46" y="360">Metal Logits Projection</text>
-<text class="panel-meta" x="46" y="376">latest 187.30 projection/s   best 187.30 projection/s</text>
-<text class="panel-meta" x="530" y="360" text-anchor="end">4c0566e</text>
-<text class="panel-meta" x="530" y="376" text-anchor="end">2026-04-21T15:39:43.916627+00:00</text>
+<text class="panel-meta" x="46" y="376">latest 89.581 projection/s   best 187.30 projection/s</text>
+<text class="panel-meta" x="530" y="360" text-anchor="end">7931839</text>
+<text class="panel-meta" x="530" y="376" text-anchor="end">2026-04-21T20:36:39.102422+00:00</text>
 <line x1="82" y1="514.00" x2="530" y2="514.00" stroke="#1d3148" stroke-width="1"/>
-<text class="axis-label" x="36" y="518.00">183.14</text>
+<text class="axis-label" x="36" y="518.00">77.854</text>
 <line x1="82" y1="480.50" x2="530" y2="480.50" stroke="#1d3148" stroke-width="1"/>
-<text class="axis-label" x="36" y="484.50">184.29</text>
+<text class="axis-label" x="36" y="484.50">108.15</text>
 <line x1="82" y1="447.00" x2="530" y2="447.00" stroke="#1d3148" stroke-width="1"/>
-<text class="axis-label" x="36" y="451.00">185.44</text>
+<text class="axis-label" x="36" y="451.00">138.44</text>
 <line x1="82" y1="413.50" x2="530" y2="413.50" stroke="#1d3148" stroke-width="1"/>
-<text class="axis-label" x="36" y="417.50">186.60</text>
+<text class="axis-label" x="36" y="417.50">168.73</text>
 <line x1="82" y1="380.00" x2="530" y2="380.00" stroke="#1d3148" stroke-width="1"/>
-<text class="axis-label" x="36" y="384.00">187.75</text>
-<polyline fill="none" stroke="#023e8a" stroke-width="3" points="82.00,501.03 530.00,392.97"/>
-<circle cx="82.00" cy="501.03" r="3.0" fill="#023e8a" stroke="#09111b" stroke-width="1.0"/>
-<circle cx="530.00" cy="392.97" r="4.5" fill="#023e8a" stroke="#ffffff" stroke-width="1.5"/>
+<text class="axis-label" x="36" y="384.00">199.03</text>
+<polyline fill="none" stroke="#023e8a" stroke-width="3" points="82.00,397.07 306.00,392.97 530.00,501.03"/>
+<circle cx="82.00" cy="397.07" r="3.0" fill="#023e8a" stroke="#09111b" stroke-width="1.0"/>
+<circle cx="306.00" cy="392.97" r="3.0" fill="#023e8a" stroke="#09111b" stroke-width="1.0"/>
+<circle cx="530.00" cy="501.03" r="4.5" fill="#023e8a" stroke="#ffffff" stroke-width="1.5"/>
 <text class="axis-label" x="82" y="540">oldest</text>
 <text class="axis-label" x="530" y="540" text-anchor="end">latest</text>
 </g>
 <g>
 <rect x="572" y="332" width="520" height="220" rx="18" fill="#0f1b2b" stroke="#1d3148" stroke-width="1"/>
-<text class="panel-title" x="590" y="360">Logits Head Matvec</text>
-<text class="panel-meta" x="590" y="376">latest 15.475 matvec/s   best 15.475 matvec/s</text>
-<text class="panel-meta" x="1074" y="360" text-anchor="end">573105b</text>
-<text class="panel-meta" x="1074" y="376" text-anchor="end">2026-04-21T14:38:48.472187+00:00</text>
+<text class="panel-title" x="590" y="360">Tracked Cached Decode</text>
+<text class="panel-meta" x="590" y="376">latest 0.10584 tok/s   best 0.10584 tok/s</text>
+<text class="panel-meta" x="1074" y="360" text-anchor="end">7931839</text>
+<text class="panel-meta" x="1074" y="376" text-anchor="end">2026-04-21T20:36:39.102422+00:00</text>
 <line x1="626" y1="514.00" x2="1074" y2="514.00" stroke="#1d3148" stroke-width="1"/>
 <text class="axis-label" x="580" y="518.00">0.00000</text>
 <line x1="626" y1="480.50" x2="1074" y2="480.50" stroke="#1d3148" stroke-width="1"/>
-<text class="axis-label" x="580" y="484.50">4.3275</text>
+<text class="axis-label" x="580" y="484.50">0.25000</text>
 <line x1="626" y1="447.00" x2="1074" y2="447.00" stroke="#1d3148" stroke-width="1"/>
-<text class="axis-label" x="580" y="451.00">8.6550</text>
+<text class="axis-label" x="580" y="451.00">0.50000</text>
 <line x1="626" y1="413.50" x2="1074" y2="413.50" stroke="#1d3148" stroke-width="1"/>
-<text class="axis-label" x="580" y="417.50">12.983</text>
+<text class="axis-label" x="580" y="417.50">0.75000</text>
 <line x1="626" y1="380.00" x2="1074" y2="380.00" stroke="#1d3148" stroke-width="1"/>
-<text class="axis-label" x="580" y="384.00">17.310</text>
-<polyline fill="none" stroke="#ff6b6b" stroke-width="3" points="626.00,512.55 738.00,512.58 850.00,497.22 962.00,496.76 1074.00,394.20"/>
-<circle cx="626.00" cy="512.55" r="3.0" fill="#ff6b6b" stroke="#09111b" stroke-width="1.0"/>
-<circle cx="738.00" cy="512.58" r="3.0" fill="#ff6b6b" stroke="#09111b" stroke-width="1.0"/>
-<circle cx="850.00" cy="497.22" r="3.0" fill="#ff6b6b" stroke="#09111b" stroke-width="1.0"/>
-<circle cx="962.00" cy="496.76" r="3.0" fill="#ff6b6b" stroke="#09111b" stroke-width="1.0"/>
-<circle cx="1074.00" cy="394.20" r="4.5" fill="#ff6b6b" stroke="#ffffff" stroke-width="1.5"/>
+<text class="axis-label" x="580" y="384.00">1.0000</text>
+<polyline fill="none" stroke="#4d96ff" stroke-width="3" points="626.00,499.82"/>
+<circle cx="626.00" cy="499.82" r="4.5" fill="#4d96ff" stroke="#ffffff" stroke-width="1.5"/>
 <text class="axis-label" x="626" y="540">oldest</text>
 <text class="axis-label" x="1074" y="540" text-anchor="end">latest</text>
 </g>
 <g>
 <rect x="28" y="576" width="520" height="220" rx="18" fill="#0f1b2b" stroke="#1d3148" stroke-width="1"/>
-<text class="panel-title" x="46" y="604">Block 0 QKV Projection</text>
-<text class="panel-meta" x="46" y="620">latest 138.39 projection/s   best 138.39 projection/s</text>
+<text class="panel-title" x="46" y="604">Logits Head Matvec</text>
+<text class="panel-meta" x="46" y="620">latest 15.475 matvec/s   best 15.475 matvec/s</text>
 <text class="panel-meta" x="530" y="604" text-anchor="end">573105b</text>
 <text class="panel-meta" x="530" y="620" text-anchor="end">2026-04-21T14:38:48.472187+00:00</text>
 <line x1="82" y1="758.00" x2="530" y2="758.00" stroke="#1d3148" stroke-width="1"/>
 <text class="axis-label" x="36" y="762.00">0.00000</text>
 <line x1="82" y1="724.50" x2="530" y2="724.50" stroke="#1d3148" stroke-width="1"/>
-<text class="axis-label" x="36" y="728.50">38.560</text>
+<text class="axis-label" x="36" y="728.50">4.3275</text>
 <line x1="82" y1="691.00" x2="530" y2="691.00" stroke="#1d3148" stroke-width="1"/>
-<text class="axis-label" x="36" y="695.00">77.121</text>
+<text class="axis-label" x="36" y="695.00">8.6550</text>
 <line x1="82" y1="657.50" x2="530" y2="657.50" stroke="#1d3148" stroke-width="1"/>
-<text class="axis-label" x="36" y="661.50">115.68</text>
+<text class="axis-label" x="36" y="661.50">12.983</text>
 <line x1="82" y1="624.00" x2="530" y2="624.00" stroke="#1d3148" stroke-width="1"/>
-<text class="axis-label" x="36" y="628.00">154.24</text>
-<polyline fill="none" stroke="#f7b801" stroke-width="3" points="82.00,752.56 194.00,752.48 306.00,695.86 418.00,695.69 530.00,637.77"/>
-<circle cx="82.00" cy="752.56" r="3.0" fill="#f7b801" stroke="#09111b" stroke-width="1.0"/>
-<circle cx="194.00" cy="752.48" r="3.0" fill="#f7b801" stroke="#09111b" stroke-width="1.0"/>
-<circle cx="306.00" cy="695.86" r="3.0" fill="#f7b801" stroke="#09111b" stroke-width="1.0"/>
-<circle cx="418.00" cy="695.69" r="3.0" fill="#f7b801" stroke="#09111b" stroke-width="1.0"/>
-<circle cx="530.00" cy="637.77" r="4.5" fill="#f7b801" stroke="#ffffff" stroke-width="1.5"/>
+<text class="axis-label" x="36" y="628.00">17.310</text>
+<polyline fill="none" stroke="#ff6b6b" stroke-width="3" points="82.00,756.55 194.00,756.58 306.00,741.22 418.00,740.76 530.00,638.20"/>
+<circle cx="82.00" cy="756.55" r="3.0" fill="#ff6b6b" stroke="#09111b" stroke-width="1.0"/>
+<circle cx="194.00" cy="756.58" r="3.0" fill="#ff6b6b" stroke="#09111b" stroke-width="1.0"/>
+<circle cx="306.00" cy="741.22" r="3.0" fill="#ff6b6b" stroke="#09111b" stroke-width="1.0"/>
+<circle cx="418.00" cy="740.76" r="3.0" fill="#ff6b6b" stroke="#09111b" stroke-width="1.0"/>
+<circle cx="530.00" cy="638.20" r="4.5" fill="#ff6b6b" stroke="#ffffff" stroke-width="1.5"/>
 <text class="axis-label" x="82" y="784">oldest</text>
 <text class="axis-label" x="530" y="784" text-anchor="end">latest</text>
 </g>
 <g>
 <rect x="572" y="576" width="520" height="220" rx="18" fill="#0f1b2b" stroke="#1d3148" stroke-width="1"/>
-<text class="panel-title" x="590" y="604">Fresh Full Token Pass</text>
-<text class="panel-meta" x="590" y="620">latest 1.1535 tok/s   best 1.1535 tok/s</text>
-<text class="panel-meta" x="1074" y="604" text-anchor="end">2d4b1f0</text>
-<text class="panel-meta" x="1074" y="620" text-anchor="end">2026-04-21T17:14:45.237004+00:00</text>
+<text class="panel-title" x="590" y="604">Block 0 QKV Projection</text>
+<text class="panel-meta" x="590" y="620">latest 138.39 projection/s   best 138.39 projection/s</text>
+<text class="panel-meta" x="1074" y="604" text-anchor="end">573105b</text>
+<text class="panel-meta" x="1074" y="620" text-anchor="end">2026-04-21T14:38:48.472187+00:00</text>
 <line x1="626" y1="758.00" x2="1074" y2="758.00" stroke="#1d3148" stroke-width="1"/>
 <text class="axis-label" x="580" y="762.00">0.00000</text>
 <line x1="626" y1="724.50" x2="1074" y2="724.50" stroke="#1d3148" stroke-width="1"/>
-<text class="axis-label" x="580" y="728.50">0.32151</text>
+<text class="axis-label" x="580" y="728.50">38.560</text>
 <line x1="626" y1="691.00" x2="1074" y2="691.00" stroke="#1d3148" stroke-width="1"/>
-<text class="axis-label" x="580" y="695.00">0.64302</text>
+<text class="axis-label" x="580" y="695.00">77.121</text>
 <line x1="626" y1="657.50" x2="1074" y2="657.50" stroke="#1d3148" stroke-width="1"/>
-<text class="axis-label" x="580" y="661.50">0.96453</text>
+<text class="axis-label" x="580" y="661.50">115.68</text>
 <line x1="626" y1="624.00" x2="1074" y2="624.00" stroke="#1d3148" stroke-width="1"/>
-<text class="axis-label" x="580" y="628.00">1.2860</text>
-<polyline fill="none" stroke="#2ec4b6" stroke-width="3" points="626.00,752.91 670.80,752.90 715.60,713.22 760.40,713.11 805.20,713.48 850.00,704.43 894.80,697.62 939.60,690.78 984.40,686.50 1029.20,670.26 1074.00,637.81"/>
-<circle cx="626.00" cy="752.91" r="3.0" fill="#2ec4b6" stroke="#09111b" stroke-width="1.0"/>
-<circle cx="670.80" cy="752.90" r="3.0" fill="#2ec4b6" stroke="#09111b" stroke-width="1.0"/>
-<circle cx="715.60" cy="713.22" r="3.0" fill="#2ec4b6" stroke="#09111b" stroke-width="1.0"/>
-<circle cx="760.40" cy="713.11" r="3.0" fill="#2ec4b6" stroke="#09111b" stroke-width="1.0"/>
-<circle cx="805.20" cy="713.48" r="3.0" fill="#2ec4b6" stroke="#09111b" stroke-width="1.0"/>
-<circle cx="850.00" cy="704.43" r="3.0" fill="#2ec4b6" stroke="#09111b" stroke-width="1.0"/>
-<circle cx="894.80" cy="697.62" r="3.0" fill="#2ec4b6" stroke="#09111b" stroke-width="1.0"/>
-<circle cx="939.60" cy="690.78" r="3.0" fill="#2ec4b6" stroke="#09111b" stroke-width="1.0"/>
-<circle cx="984.40" cy="686.50" r="3.0" fill="#2ec4b6" stroke="#09111b" stroke-width="1.0"/>
-<circle cx="1029.20" cy="670.26" r="3.0" fill="#2ec4b6" stroke="#09111b" stroke-width="1.0"/>
-<circle cx="1074.00" cy="637.81" r="4.5" fill="#2ec4b6" stroke="#ffffff" stroke-width="1.5"/>
+<text class="axis-label" x="580" y="628.00">154.24</text>
+<polyline fill="none" stroke="#f7b801" stroke-width="3" points="626.00,752.56 738.00,752.48 850.00,695.86 962.00,695.69 1074.00,637.77"/>
+<circle cx="626.00" cy="752.56" r="3.0" fill="#f7b801" stroke="#09111b" stroke-width="1.0"/>
+<circle cx="738.00" cy="752.48" r="3.0" fill="#f7b801" stroke="#09111b" stroke-width="1.0"/>
+<circle cx="850.00" cy="695.86" r="3.0" fill="#f7b801" stroke="#09111b" stroke-width="1.0"/>
+<circle cx="962.00" cy="695.69" r="3.0" fill="#f7b801" stroke="#09111b" stroke-width="1.0"/>
+<circle cx="1074.00" cy="637.77" r="4.5" fill="#f7b801" stroke="#ffffff" stroke-width="1.5"/>
 <text class="axis-label" x="626" y="784">oldest</text>
 <text class="axis-label" x="1074" y="784" text-anchor="end">latest</text>
 </g>
 <g>
 <rect x="28" y="820" width="520" height="220" rx="18" fill="#0f1b2b" stroke="#1d3148" stroke-width="1"/>
-<text class="panel-title" x="46" y="848">Cached Decode</text>
-<text class="panel-meta" x="46" y="864">latest 1.0547 tok/s   best 1.0547 tok/s</text>
+<text class="panel-title" x="46" y="848">Fresh Full Token Pass</text>
+<text class="panel-meta" x="46" y="864">latest 1.1535 tok/s   best 1.1535 tok/s</text>
 <text class="panel-meta" x="530" y="848" text-anchor="end">2d4b1f0</text>
 <text class="panel-meta" x="530" y="864" text-anchor="end">2026-04-21T17:14:45.237004+00:00</text>
 <line x1="82" y1="1002.00" x2="530" y2="1002.00" stroke="#1d3148" stroke-width="1"/>
 <text class="axis-label" x="36" y="1006.00">0.00000</text>
 <line x1="82" y1="968.50" x2="530" y2="968.50" stroke="#1d3148" stroke-width="1"/>
-<text class="axis-label" x="36" y="972.50">0.29398</text>
+<text class="axis-label" x="36" y="972.50">0.32151</text>
 <line x1="82" y1="935.00" x2="530" y2="935.00" stroke="#1d3148" stroke-width="1"/>
-<text class="axis-label" x="36" y="939.00">0.58796</text>
+<text class="axis-label" x="36" y="939.00">0.64302</text>
 <line x1="82" y1="901.50" x2="530" y2="901.50" stroke="#1d3148" stroke-width="1"/>
-<text class="axis-label" x="36" y="905.50">0.88194</text>
+<text class="axis-label" x="36" y="905.50">0.96453</text>
 <line x1="82" y1="868.00" x2="530" y2="868.00" stroke="#1d3148" stroke-width="1"/>
-<text class="axis-label" x="36" y="872.00">1.1759</text>
-<polyline fill="none" stroke="#3a86ff" stroke-width="3" points="82.00,996.59 126.80,996.89 171.60,955.73 216.40,955.63 261.20,963.98 306.00,946.61 350.80,940.15 395.60,933.77 440.40,928.65 485.20,913.03 530.00,881.81"/>
-<circle cx="82.00" cy="996.59" r="3.0" fill="#3a86ff" stroke="#09111b" stroke-width="1.0"/>
-<circle cx="126.80" cy="996.89" r="3.0" fill="#3a86ff" stroke="#09111b" stroke-width="1.0"/>
-<circle cx="171.60" cy="955.73" r="3.0" fill="#3a86ff" stroke="#09111b" stroke-width="1.0"/>
-<circle cx="216.40" cy="955.63" r="3.0" fill="#3a86ff" stroke="#09111b" stroke-width="1.0"/>
-<circle cx="261.20" cy="963.98" r="3.0" fill="#3a86ff" stroke="#09111b" stroke-width="1.0"/>
-<circle cx="306.00" cy="946.61" r="3.0" fill="#3a86ff" stroke="#09111b" stroke-width="1.0"/>
-<circle cx="350.80" cy="940.15" r="3.0" fill="#3a86ff" stroke="#09111b" stroke-width="1.0"/>
-<circle cx="395.60" cy="933.77" r="3.0" fill="#3a86ff" stroke="#09111b" stroke-width="1.0"/>
-<circle cx="440.40" cy="928.65" r="3.0" fill="#3a86ff" stroke="#09111b" stroke-width="1.0"/>
-<circle cx="485.20" cy="913.03" r="3.0" fill="#3a86ff" stroke="#09111b" stroke-width="1.0"/>
-<circle cx="530.00" cy="881.81" r="4.5" fill="#3a86ff" stroke="#ffffff" stroke-width="1.5"/>
+<text class="axis-label" x="36" y="872.00">1.2860</text>
+<polyline fill="none" stroke="#2ec4b6" stroke-width="3" points="82.00,996.91 126.80,996.90 171.60,957.22 216.40,957.11 261.20,957.48 306.00,948.43 350.80,941.62 395.60,934.78 440.40,930.50 485.20,914.26 530.00,881.81"/>
+<circle cx="82.00" cy="996.91" r="3.0" fill="#2ec4b6" stroke="#09111b" stroke-width="1.0"/>
+<circle cx="126.80" cy="996.90" r="3.0" fill="#2ec4b6" stroke="#09111b" stroke-width="1.0"/>
+<circle cx="171.60" cy="957.22" r="3.0" fill="#2ec4b6" stroke="#09111b" stroke-width="1.0"/>
+<circle cx="216.40" cy="957.11" r="3.0" fill="#2ec4b6" stroke="#09111b" stroke-width="1.0"/>
+<circle cx="261.20" cy="957.48" r="3.0" fill="#2ec4b6" stroke="#09111b" stroke-width="1.0"/>
+<circle cx="306.00" cy="948.43" r="3.0" fill="#2ec4b6" stroke="#09111b" stroke-width="1.0"/>
+<circle cx="350.80" cy="941.62" r="3.0" fill="#2ec4b6" stroke="#09111b" stroke-width="1.0"/>
+<circle cx="395.60" cy="934.78" r="3.0" fill="#2ec4b6" stroke="#09111b" stroke-width="1.0"/>
+<circle cx="440.40" cy="930.50" r="3.0" fill="#2ec4b6" stroke="#09111b" stroke-width="1.0"/>
+<circle cx="485.20" cy="914.26" r="3.0" fill="#2ec4b6" stroke="#09111b" stroke-width="1.0"/>
+<circle cx="530.00" cy="881.81" r="4.5" fill="#2ec4b6" stroke="#ffffff" stroke-width="1.5"/>
 <text class="axis-label" x="82" y="1028">oldest</text>
 <text class="axis-label" x="530" y="1028" text-anchor="end">latest</text>
+</g>
+<g>
+<rect x="572" y="820" width="520" height="220" rx="18" fill="#0f1b2b" stroke="#1d3148" stroke-width="1"/>
+<text class="panel-title" x="590" y="848">Cached Decode</text>
+<text class="panel-meta" x="590" y="864">latest 1.0547 tok/s   best 1.0547 tok/s</text>
+<text class="panel-meta" x="1074" y="848" text-anchor="end">2d4b1f0</text>
+<text class="panel-meta" x="1074" y="864" text-anchor="end">2026-04-21T17:14:45.237004+00:00</text>
+<line x1="626" y1="1002.00" x2="1074" y2="1002.00" stroke="#1d3148" stroke-width="1"/>
+<text class="axis-label" x="580" y="1006.00">0.00000</text>
+<line x1="626" y1="968.50" x2="1074" y2="968.50" stroke="#1d3148" stroke-width="1"/>
+<text class="axis-label" x="580" y="972.50">0.29398</text>
+<line x1="626" y1="935.00" x2="1074" y2="935.00" stroke="#1d3148" stroke-width="1"/>
+<text class="axis-label" x="580" y="939.00">0.58796</text>
+<line x1="626" y1="901.50" x2="1074" y2="901.50" stroke="#1d3148" stroke-width="1"/>
+<text class="axis-label" x="580" y="905.50">0.88194</text>
+<line x1="626" y1="868.00" x2="1074" y2="868.00" stroke="#1d3148" stroke-width="1"/>
+<text class="axis-label" x="580" y="872.00">1.1759</text>
+<polyline fill="none" stroke="#3a86ff" stroke-width="3" points="626.00,996.59 670.80,996.89 715.60,955.73 760.40,955.63 805.20,963.98 850.00,946.61 894.80,940.15 939.60,933.77 984.40,928.65 1029.20,913.03 1074.00,881.81"/>
+<circle cx="626.00" cy="996.59" r="3.0" fill="#3a86ff" stroke="#09111b" stroke-width="1.0"/>
+<circle cx="670.80" cy="996.89" r="3.0" fill="#3a86ff" stroke="#09111b" stroke-width="1.0"/>
+<circle cx="715.60" cy="955.73" r="3.0" fill="#3a86ff" stroke="#09111b" stroke-width="1.0"/>
+<circle cx="760.40" cy="955.63" r="3.0" fill="#3a86ff" stroke="#09111b" stroke-width="1.0"/>
+<circle cx="805.20" cy="963.98" r="3.0" fill="#3a86ff" stroke="#09111b" stroke-width="1.0"/>
+<circle cx="850.00" cy="946.61" r="3.0" fill="#3a86ff" stroke="#09111b" stroke-width="1.0"/>
+<circle cx="894.80" cy="940.15" r="3.0" fill="#3a86ff" stroke="#09111b" stroke-width="1.0"/>
+<circle cx="939.60" cy="933.77" r="3.0" fill="#3a86ff" stroke="#09111b" stroke-width="1.0"/>
+<circle cx="984.40" cy="928.65" r="3.0" fill="#3a86ff" stroke="#09111b" stroke-width="1.0"/>
+<circle cx="1029.20" cy="913.03" r="3.0" fill="#3a86ff" stroke="#09111b" stroke-width="1.0"/>
+<circle cx="1074.00" cy="881.81" r="4.5" fill="#3a86ff" stroke="#ffffff" stroke-width="1.5"/>
+<text class="axis-label" x="626" y="1028">oldest</text>
+<text class="axis-label" x="1074" y="1028" text-anchor="end">latest</text>
 </g>
 </svg>
