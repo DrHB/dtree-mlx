@@ -1,11 +1,16 @@
 from __future__ import annotations
 
-from dtree_mlx.zig_autoresearch import (
-    build_suite_specs,
-    parse_key_value_output,
-    render_summary,
-    render_svg,
-)
+import importlib.util
+from pathlib import Path
+import sys
+
+
+SCRIPT_PATH = Path(__file__).resolve().parents[1] / "scripts" / "zig_autoresearch.py"
+SPEC = importlib.util.spec_from_file_location("zig_autoresearch", SCRIPT_PATH)
+assert SPEC is not None and SPEC.loader is not None
+MODULE = importlib.util.module_from_spec(SPEC)
+sys.modules[SPEC.name] = MODULE
+SPEC.loader.exec_module(MODULE)
 
 
 def test_parse_key_value_output_extracts_numeric_metrics():
@@ -17,7 +22,7 @@ checksum: 86.02596092224121
 note: benchmark
 """
 
-    metrics = parse_key_value_output(stdout)
+    metrics = MODULE.parse_key_value_output(stdout)
 
     assert metrics["elapsed_s"] == 43.155244
     assert metrics["cached_decode_tok_per_s"] == 0.04634430985953873
@@ -26,15 +31,15 @@ note: benchmark
 
 
 def test_build_suite_specs_respects_profiles():
-    assert [spec.name for spec in build_suite_specs("model.gguf", 42, "micro")] == [
+    assert [spec.name for spec in MODULE.build_suite_specs("model.gguf", 42, "micro")] == [
         "logits_matvec",
         "blk0_qkv_projection",
     ]
-    assert [spec.name for spec in build_suite_specs("model.gguf", 42, "decode")] == [
+    assert [spec.name for spec in MODULE.build_suite_specs("model.gguf", 42, "decode")] == [
         "full_token_pass",
         "cached_decode",
     ]
-    assert [spec.name for spec in build_suite_specs("model.gguf", 42, "full")] == [
+    assert [spec.name for spec in MODULE.build_suite_specs("model.gguf", 42, "full")] == [
         "logits_matvec",
         "blk0_qkv_projection",
         "full_token_pass",
@@ -110,8 +115,8 @@ def test_render_summary_and_svg_include_latest_metrics():
         },
     ]
 
-    summary = render_summary(rows)
-    svg = render_svg(rows)
+    summary = MODULE.render_summary(rows)
+    svg = MODULE.render_svg(rows)
 
     assert "Latest Run" in summary
     assert "simd q6" in summary
