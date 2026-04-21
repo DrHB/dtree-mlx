@@ -420,6 +420,9 @@ def run_coverage(profile: str) -> str:
 
 
 def suite_backend(spec_name: str, metrics: dict[str, Any]) -> str:
+    decode_backend = metrics.get("decode_backend")
+    if isinstance(decode_backend, str) and decode_backend:
+        return decode_backend
     backend = metrics.get("projection_backend")
     if isinstance(backend, str) and backend:
         return backend

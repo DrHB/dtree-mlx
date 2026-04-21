@@ -22,7 +22,7 @@ This file is generated from `experiments/results.csv`.
 | Metal Add-One | `metal` | `metal-kernel` | `metal_elements_per_s` | 2470434680.17 elements/s | -538391718.68 |
 | Metal QKV Projection | `metal` | `metal-kernel` | `metal_projection_passes_per_s` | 1185.89 projection/s | -1077.07 |
 | Metal Logits Projection | `metal` | `metal-kernel` | `metal_projection_passes_per_s` | 89.581 projection/s | -97.720 |
-| Tracked Cached Decode | `cpu` | `tracked-decode` | `steady_decode_tok_per_s` | 0.10584 tok/s | n/a |
+| Tracked Cached Decode | `metal-cache` | `tracked-decode` | `steady_decode_tok_per_s` | 0.10584 tok/s | n/a |
 
 ## Best So Far
 

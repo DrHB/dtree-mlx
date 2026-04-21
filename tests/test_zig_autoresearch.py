@@ -112,6 +112,10 @@ def test_tracked_profile_forces_metal_decode_on_decode_suites():
     assert all("--token-seq-file" in spec.command for spec in decode_specs)
 
 
+def test_suite_backend_prefers_decode_backend_for_trace_decode():
+    assert MODULE.suite_backend("cached_decode_trace", {"decode_backend": "metal-cache"}) == "metal-cache"
+
+
 def test_zig_build_command_uses_release_flags():
     assert MODULE.zig_build_command("Debug") == ["zig", "build"]
     assert MODULE.zig_build_command("ReleaseFast") == ["zig", "build", "--release=fast"]
