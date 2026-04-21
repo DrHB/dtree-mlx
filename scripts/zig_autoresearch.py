@@ -73,6 +73,11 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="Benchmark subset to run. full = micro + decode.",
     )
     parser.add_argument(
+        "--metal-decode",
+        action="store_true",
+        help="Pass --metal-decode through to the decode benchmarks.",
+    )
+    parser.add_argument(
         "--token-id",
         type=int,
         default=42,
@@ -136,9 +141,10 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     return parser.parse_args(argv)
 
 
-def build_suite_specs(model: str, token_id: int, profile: str) -> list[SuiteSpec]:
+def build_suite_specs(model: str, token_id: int, profile: str, metal_decode: bool = False) -> list[SuiteSpec]:
     binary = str(ZIG_BINARY)
     metal_binary = str(METAL_BINARY)
+    decode_backend_flags = ["--metal-decode"] if metal_decode else []
     specs = OrderedDict(
         [
             (
@@ -300,6 +306,7 @@ def build_suite_specs(model: str, token_id: int, profile: str) -> list[SuiteSpec
                         "2",
                         "--bench-warmup",
                         "1",
+                        *decode_backend_flags,
                     ],
                     bench_iters=2,
                     bench_warmup=1,
@@ -325,6 +332,7 @@ def build_suite_specs(model: str, token_id: int, profile: str) -> list[SuiteSpec
                         "2",
                         "--bench-warmup",
                         "1",
+                        *decode_backend_flags,
                     ],
                     bench_iters=2,
                     bench_warmup=1,
@@ -339,7 +347,7 @@ def build_suite_specs(model: str, token_id: int, profile: str) -> list[SuiteSpec
     elif profile == "metal":
         names = ["metal_add_one", "metal_qkv_projection", "metal_logits_projection"]
     else:
-        names = SUITE_ORDER
+        names = ["logits_matvec", "blk0_qkv_projection", "full_token_pass", "cached_decode"]
     return [specs[name] for name in names]
 
 
@@ -355,7 +363,7 @@ def main(argv: list[str] | None = None) -> None:
         print(f"updated reports from {args.results_csv}")
         return
 
-    specs = build_suite_specs(args.model, args.token_id, args.profile)
+    specs = build_suite_specs(args.model, args.token_id, args.profile, args.metal_decode)
     git_meta = current_git_metadata()
     label = args.label.strip() or args.notes.strip() or git_meta["git_subject"]
     meta = {
@@ -365,6 +373,7 @@ def main(argv: list[str] | None = None) -> None:
         "notes": args.notes.strip(),
         "round_id": args.round_id.strip(),
         "build_optimize": args.optimize,
+        "decode_backend": "metal-cache" if args.metal_decode else "cpu",
     }
     timestamp = meta["timestamp_utc"]
     run_id = make_run_id(timestamp, meta["git_short_commit"], args.profile, meta["git_dirty"])

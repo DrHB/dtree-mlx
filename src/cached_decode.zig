@@ -1,12 +1,19 @@
 const std = @import("std");
 const gguf = @import("gguf.zig");
 const gguf_store = @import("gguf_store.zig");
+const metal_backend = @import("metal_backend.zig");
 const ops = @import("ops.zig");
 const parallel_rows = @import("parallel_rows.zig");
 
 pub const OutputCandidate = struct {
     token_id: usize,
     logit: f32,
+};
+
+const ScanOutputResult = struct {
+    argmax_token_id: usize,
+    argmax_logit: f32,
+    top_count: usize,
 };
 
 pub const RunResult = struct {
@@ -201,6 +208,7 @@ const Scratch = struct {
 pub const Engine = struct {
     allocator: std.mem.Allocator,
     store: *const gguf_store.Store,
+    backend: ?*metal_backend.Backend,
     hparams: HParams,
     max_seq_len: usize,
     position: usize,
@@ -211,10 +219,12 @@ pub const Engine = struct {
     recurrent_caches: []RecurrentCache,
     full_caches: []FullCache,
     scratch: Scratch,
+    output_logits: ?[]f32,
 
     pub fn init(
         allocator: std.mem.Allocator,
         store: *const gguf_store.Store,
+        backend: ?*metal_backend.Backend,
         max_seq_len: usize,
     ) !Engine {
         if (max_seq_len == 0) return error.InvalidMaxSeqLen;
@@ -246,6 +256,8 @@ pub const Engine = struct {
             var scratch_copy = scratch;
             scratch_copy.deinit(allocator);
         }
+        const output_logits = if (backend != null) try allocator.alloc(f32, output.row_count) else null;
+        errdefer if (output_logits) |logits| allocator.free(logits);
 
         var recurrent_index: usize = 0;
         var full_index: usize = 0;
@@ -275,6 +287,7 @@ pub const Engine = struct {
         return .{
             .allocator = allocator,
             .store = store,
+            .backend = backend,
             .hparams = hparams,
             .max_seq_len = max_seq_len,
             .position = 0,
@@ -285,6 +298,7 @@ pub const Engine = struct {
             .recurrent_caches = recurrent_caches,
             .full_caches = full_caches,
             .scratch = scratch,
+            .output_logits = output_logits,
         };
     }
 
@@ -299,6 +313,7 @@ pub const Engine = struct {
         }
         self.allocator.free(self.recurrent_caches);
         self.allocator.free(self.full_caches);
+        if (self.output_logits) |logits| self.allocator.free(logits);
         self.scratch.deinit(self.allocator);
         self.allocator.free(self.layers);
         self.* = undefined;
@@ -340,6 +355,8 @@ pub const Engine = struct {
         );
 
         const result = try scanOutput(
+            self.backend,
+            self.output_logits,
             self.output,
             self.scratch.hidden1[0..self.hparams.n_embd],
             top_out,
@@ -442,6 +459,7 @@ pub const Engine = struct {
         );
 
         try runFfn(
+            self.backend,
             self.hparams,
             &self.scratch,
             layer.ffn,
@@ -471,10 +489,10 @@ pub const Engine = struct {
         const conv_slots = self.hparams.ssm_conv_kernel - 1;
         const q_scale = @as(f32, @floatCast(1.0 / std.math.sqrt(@as(f64, @floatFromInt(head_k_dim)))));
 
-        try projectAllRows(weights.qkv, input, self.scratch.wide0[0..qkv_len]);
-        try projectAllRows(weights.gate, input, self.scratch.wide1[0..v_len]);
-        try projectAllRows(weights.alpha, input, self.scratch.expert0[0..num_v_heads]);
-        try projectAllRows(weights.beta, input, self.scratch.small32[0..num_v_heads]);
+        try projectAllRows(self.backend, weights.qkv, input, self.scratch.wide0[0..qkv_len]);
+        try projectAllRows(self.backend, weights.gate, input, self.scratch.wide1[0..v_len]);
+        try projectAllRows(self.backend, weights.alpha, input, self.scratch.expert0[0..num_v_heads]);
+        try projectAllRows(self.backend, weights.beta, input, self.scratch.small32[0..num_v_heads]);
         try loadWeightRow(weights.dt, self.scratch.expert1[0..num_v_heads]);
         try loadWeightRow(weights.a, self.scratch.weight[0..num_v_heads]);
 
@@ -579,7 +597,7 @@ pub const Engine = struct {
             self.scratch.wide2[idx] *= silu(self.scratch.wide1[idx]);
         }
 
-        try projectAllRows(weights.out, self.scratch.wide2[0..v_len], out_hidden);
+        try projectAllRows(self.backend, weights.out, self.scratch.wide2[0..v_len], out_hidden);
     }
 
     fn stepFullAttention(
@@ -624,7 +642,7 @@ pub const Engine = struct {
             );
         }
 
-        try projectAllRows(weights.k, input, self.scratch.wide2[0..kv_len]);
+        try projectAllRows(self.backend, weights.k, input, self.scratch.wide2[0..kv_len]);
         try loadWeightRow(weights.k_norm, self.scratch.small_head[0..head_dim]);
         for (0..num_kv_heads) |head_idx| {
             const start = head_idx * head_dim;
@@ -642,7 +660,7 @@ pub const Engine = struct {
             );
         }
 
-        try projectAllRows(weights.v, input, self.scratch.wide2[kv_len .. kv_len * 2]);
+        try projectAllRows(self.backend, weights.v, input, self.scratch.wide2[kv_len .. kv_len * 2]);
 
         for (0..num_kv_heads) |head_idx| {
             const cache_base = (self.position * num_kv_heads + head_idx) * head_dim;
@@ -683,6 +701,7 @@ pub const Engine = struct {
         }
 
         try projectAllRows(
+            self.backend,
             weights.out,
             self.scratch.wide2[attn_out_offset .. attn_out_offset + q_len],
             out_hidden,
@@ -808,6 +827,7 @@ fn isFullLayer(store: *const gguf_store.Store, layer_idx: usize) !bool {
 }
 
 fn runFfn(
+    backend: ?*metal_backend.Backend,
     hparams: HParams,
     scratch: *Scratch,
     weights: FfnWeights,
@@ -819,7 +839,7 @@ fn runFfn(
     const expert_ff = hparams.expert_ffn_len;
     const shared_ff = hparams.expert_shared_ffn_len;
 
-    try projectAllRows(weights.gate_inp, input, scratch.router_logits);
+    try projectAllRows(backend, weights.gate_inp, input, scratch.router_logits);
     selectTopK(
         scratch.router_logits,
         scratch.selected_indices,
@@ -870,21 +890,35 @@ fn runFfn(
 }
 
 fn scanOutput(
+    backend: ?*metal_backend.Backend,
+    output_logits: ?[]f32,
     tensor: gguf_store.TensorView,
     hidden: []const f32,
     top_out: []OutputCandidate,
-) !struct {
-    argmax_token_id: usize,
-    argmax_logit: f32,
-    top_count: usize,
-} {
+) !ScanOutputResult {
     if (top_out.len == 0) {
+        if (backend) |metal| {
+            if (output_logits) |logits| {
+                if (try metal.projectAllRows(tensor, hidden, logits)) {
+                    return scanProjectedOutput(logits, top_out);
+                }
+            }
+        }
+
         const best = try parallel_rows.argmaxRows(tensor, hidden);
         return .{
             .argmax_token_id = best.row_index,
             .argmax_logit = best.value,
             .top_count = 0,
         };
+    }
+
+    if (backend) |metal| {
+        if (output_logits) |logits| {
+            if (try metal.projectAllRows(tensor, hidden, logits)) {
+                return scanProjectedOutput(logits, top_out);
+            }
+        }
     }
 
     var argmax_token_id: usize = 0;
@@ -982,12 +1016,44 @@ fn loadWeightRow(tensor: gguf_store.TensorView, out: []f32) !void {
 }
 
 fn projectAllRows(
+    backend: ?*metal_backend.Backend,
     tensor: gguf_store.TensorView,
     input: []const f32,
     out: []f32,
 ) !void {
     if (out.len < tensor.row_count) return error.OutputBufferTooSmall;
+    if (backend) |metal| {
+        if (try metal.projectAllRows(tensor, input, out)) return;
+    }
     try parallel_rows.matvecRows(tensor, input, 0, tensor.row_count, out);
+}
+
+fn scanProjectedOutput(
+    logits: []const f32,
+    top_out: []OutputCandidate,
+) ScanOutputResult {
+    var argmax_token_id: usize = 0;
+    var argmax_logit = -std.math.inf(f32);
+    initCandidates(top_out);
+
+    for (logits, 0..) |logit, token_idx| {
+        if (logit > argmax_logit) {
+            argmax_logit = logit;
+            argmax_token_id = token_idx;
+        }
+        if (top_out.len != 0) {
+            insertCandidate(top_out, .{
+                .token_id = token_idx,
+                .logit = logit,
+            });
+        }
+    }
+
+    return .{
+        .argmax_token_id = argmax_token_id,
+        .argmax_logit = argmax_logit,
+        .top_count = countCandidates(top_out),
+    };
 }
 
 fn projectQAndGate(

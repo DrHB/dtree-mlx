@@ -89,6 +89,15 @@ def test_build_suite_specs_respects_profiles():
     ]
 
 
+def test_build_suite_specs_passes_metal_decode_flag_to_decode_suites():
+    specs = MODULE.build_suite_specs("model.gguf", 42, "decode", metal_decode=True)
+
+    assert specs[0].name == "full_token_pass"
+    assert specs[1].name == "cached_decode"
+    assert "--metal-decode" in specs[0].command
+    assert "--metal-decode" in specs[1].command
+
+
 def test_zig_build_command_uses_release_flags():
     assert MODULE.zig_build_command("Debug") == ["zig", "build"]
     assert MODULE.zig_build_command("ReleaseFast") == ["zig", "build", "--release=fast"]

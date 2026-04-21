@@ -1,6 +1,7 @@
 const std = @import("std");
 const gguf = @import("gguf.zig");
 const gguf_store = @import("gguf_store.zig");
+const metal_backend = @import("metal_backend.zig");
 const ops = @import("ops.zig");
 const parallel_rows = @import("parallel_rows.zig");
 const single_token = @import("single_token.zig");
@@ -27,6 +28,7 @@ const Args = struct {
     full_token_pass: bool = false,
     cached_decode: bool = false,
     decode_steps: usize = 8,
+    metal_decode: bool = false,
 };
 
 pub fn main(init: std.process.Init) !void {
@@ -190,6 +192,8 @@ fn parseArgs(
             out.cached_decode = true;
         } else if (std.mem.eql(u8, arg, "--decode-steps")) {
             out.decode_steps = try std.fmt.parseInt(usize, arg_it.next() orelse return error.MissingValue, 10);
+        } else if (std.mem.eql(u8, arg, "--metal-decode")) {
+            out.metal_decode = true;
         } else {
             std.debug.print("unknown argument: {s}\n", .{arg});
             printUsage();
@@ -595,7 +599,17 @@ fn printSingleTokenDetail(
     args: Args,
 ) !void {
     const token_id = args.token_id orelse return error.MissingTokenId;
-    var engine = try single_token.Engine.init(allocator, store);
+    var backend_storage: ?metal_backend.Backend = null;
+    defer if (backend_storage) |*backend| backend.deinit();
+    if (args.metal_decode) {
+        backend_storage = try metal_backend.Backend.init(allocator, metal_backend.default_max_cache_bytes);
+    }
+
+    var engine = try single_token.Engine.init(
+        allocator,
+        store,
+        if (backend_storage) |*backend| backend else null,
+    );
     defer engine.deinit();
 
     const top_limit = @max(@as(usize, 1), args.value_limit);
@@ -606,6 +620,7 @@ fn printSingleTokenDetail(
 
     try writer.writeAll("Single-token full forward\n");
     try writer.print("token_id: {d}\n", .{token_id});
+    try writer.print("projection_backend: {s}\n", .{if (args.metal_decode) "metal-cache" else "cpu"});
     try writer.print("layers: {d}\n", .{engine.hparams.n_layers});
     try writer.print("embedding_length: {d}\n", .{engine.hparams.n_embd});
     try writer.writeAll("mode: fresh token, zero history, zero recurrent state\n");
@@ -618,7 +633,7 @@ fn printSingleTokenDetail(
     }
     try writer.writeAll("]\n");
     try writer.writeAll(
-        "note: this is an exact fresh-token pass for one token with no cache/history, so it is a pure-Zig baseline rather than cached decode tok/s.\n",
+        "note: this is an exact fresh-token pass for one token with no cache/history. With --metal-decode, supported projection tensors run through the native Zig Metal backend.\n",
     );
 }
 
@@ -631,13 +646,24 @@ fn printSingleTokenBenchmark(
     const token_id = args.token_id orelse return error.MissingTokenId;
     if (args.bench_iters == 0) return error.InvalidBenchIters;
 
-    var engine = try single_token.Engine.init(allocator, store);
+    var backend_storage: ?metal_backend.Backend = null;
+    defer if (backend_storage) |*backend| backend.deinit();
+    if (args.metal_decode) {
+        backend_storage = try metal_backend.Backend.init(allocator, metal_backend.default_max_cache_bytes);
+    }
+
+    var engine = try single_token.Engine.init(
+        allocator,
+        store,
+        if (backend_storage) |*backend| backend else null,
+    );
     defer engine.deinit();
 
     const result = try engine.benchmark(token_id, args.bench_warmup, args.bench_iters);
 
     try writer.writeAll("Single-token full forward benchmark\n");
     try writer.print("token_id: {d}\n", .{token_id});
+    try writer.print("projection_backend: {s}\n", .{if (args.metal_decode) "metal-cache" else "cpu"});
     try writer.print("layers: {d}\n", .{engine.hparams.n_layers});
     try writer.print("embedding_length: {d}\n", .{engine.hparams.n_embd});
     try writer.writeAll("mode: fresh token, zero history, zero recurrent state\n");
@@ -648,7 +674,7 @@ fn printSingleTokenBenchmark(
     try writer.print("fresh_token_tok_per_s: {d}\n", .{result.passes_per_s});
     try writer.print("checksum: {d}\n", .{result.checksum});
     try writer.writeAll(
-        "note: this is a full pure-Zig one-token forward pass with no cache/history. Cached autoregressive decode will be different once stateful decode exists.\n",
+        "note: this is a full one-token forward pass with no cache/history. With --metal-decode, supported projection tensors use the native Zig Metal backend.\n",
     );
 }
 
@@ -662,7 +688,18 @@ fn printCachedDecodeDetail(
     if (args.decode_steps == 0) return error.InvalidDecodeSteps;
 
     const top_limit = @max(@as(usize, 1), args.value_limit);
-    var engine = try cached_decode.Engine.init(allocator, store, args.decode_steps);
+    var backend_storage: ?metal_backend.Backend = null;
+    defer if (backend_storage) |*backend| backend.deinit();
+    if (args.metal_decode) {
+        backend_storage = try metal_backend.Backend.init(allocator, metal_backend.default_max_cache_bytes);
+    }
+
+    var engine = try cached_decode.Engine.init(
+        allocator,
+        store,
+        if (backend_storage) |*backend| backend else null,
+        args.decode_steps,
+    );
     defer engine.deinit();
 
     const candidates = try allocator.alloc(cached_decode.OutputCandidate, top_limit);
@@ -672,6 +709,7 @@ fn printCachedDecodeDetail(
 
     try writer.writeAll("Cached decode\n");
     try writer.print("token_id: {d}\n", .{token_id});
+    try writer.print("projection_backend: {s}\n", .{if (args.metal_decode) "metal-cache" else "cpu"});
     try writer.print("decode_steps: {d}\n", .{args.decode_steps});
     try writer.print("final_position: {d}\n", .{result.position});
     try writer.print("argmax_token_id: {d}\n", .{result.argmax_token_id});
@@ -683,7 +721,7 @@ fn printCachedDecodeDetail(
     }
     try writer.writeAll("]\n");
     try writer.writeAll(
-        "note: this is repeated-token cached decode in pure Zig. The model state is real; the repeated token stream is a tokenizer-free benchmark input.\n",
+        "note: this is repeated-token cached decode with real model state. With --metal-decode, supported projection tensors run through the native Zig Metal backend.\n",
     );
 }
 
@@ -697,20 +735,32 @@ fn printCachedDecodeBenchmark(
     if (args.bench_iters == 0) return error.InvalidBenchIters;
 
     const max_seq_len = try std.math.add(usize, args.bench_warmup, args.bench_iters);
-    var engine = try cached_decode.Engine.init(allocator, store, max_seq_len);
+    var backend_storage: ?metal_backend.Backend = null;
+    defer if (backend_storage) |*backend| backend.deinit();
+    if (args.metal_decode) {
+        backend_storage = try metal_backend.Backend.init(allocator, metal_backend.default_max_cache_bytes);
+    }
+
+    var engine = try cached_decode.Engine.init(
+        allocator,
+        store,
+        if (backend_storage) |*backend| backend else null,
+        max_seq_len,
+    );
     defer engine.deinit();
 
     const result = try engine.benchmark(token_id, args.bench_warmup, args.bench_iters);
 
     try writer.writeAll("Cached decode benchmark\n");
     try writer.print("token_id: {d}\n", .{token_id});
+    try writer.print("projection_backend: {s}\n", .{if (args.metal_decode) "metal-cache" else "cpu"});
     try writer.print("warmup_tokens: {d}\n", .{result.warmup_tokens});
     try writer.print("timed_tokens: {d}\n", .{result.timed_tokens});
     try writer.print("elapsed_s: {d}\n", .{result.elapsed_s});
     try writer.print("cached_decode_tok_per_s: {d}\n", .{result.tok_per_s});
     try writer.print("checksum: {d}\n", .{result.checksum});
     try writer.writeAll(
-        "note: this is repeated-token autoregressive decode with real recurrent and KV caches in pure Zig. Tokenization/chat templating are still outside this benchmark.\n",
+        "note: this is repeated-token autoregressive decode with real recurrent and KV caches. With --metal-decode, supported projection tensors run through the native Zig Metal backend.\n",
     );
 }
 
@@ -877,6 +927,7 @@ fn printUsage() void {
         \\  --full-token-pass    Run the full fresh-token pass through all layers.
         \\  --cached-decode      Run repeated-token cached decode with real model state.
         \\  --decode-steps N     Token steps for cached decode detail mode. Default: 8
+        \\  --metal-decode       Use the native Zig Metal backend for supported projection tensors.
         \\  --help               Print this help text.
         \\
         \\Supported row decoding and row-dot today: f32, q4_K, q6_K.

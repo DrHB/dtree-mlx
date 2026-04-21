@@ -117,6 +117,73 @@ pub const MatVecBenchmarkResult = struct {
     }
 };
 
+pub const DenseBuffer = struct {
+    object: Id,
+    floats: [*]f32,
+    len: usize,
+};
+
+pub const DenseContext = struct {
+    session: Session,
+    pipeline: Pipeline,
+
+    pub fn init() Error!DenseContext {
+        if (builtin.os.tag != .macos) return error.UnsupportedPlatform;
+
+        var session = try createSession();
+        errdefer session.deinit();
+        var pipeline = try createPipeline(&session, "dense_matvec_f32");
+        errdefer pipeline.deinit(&session.symbols);
+
+        return .{
+            .session = session,
+            .pipeline = pipeline,
+        };
+    }
+
+    pub fn deinit(self: *DenseContext) void {
+        self.pipeline.deinit(&self.session.symbols);
+        self.session.deinit();
+        self.* = undefined;
+    }
+
+    pub fn allocBuffer(self: *DenseContext, element_count: usize) Error!DenseBuffer {
+        const buffer = try allocateSharedBuffer(&self.session, element_count);
+        return .{
+            .object = buffer.object,
+            .floats = buffer.floats,
+            .len = element_count,
+        };
+    }
+
+    pub fn releaseBuffer(self: *DenseContext, buffer: *DenseBuffer) void {
+        release(&self.session.symbols, buffer.object);
+        buffer.* = undefined;
+    }
+
+    pub fn matvec(
+        self: *DenseContext,
+        matrix: *const DenseBuffer,
+        vector: *const DenseBuffer,
+        output: *const DenseBuffer,
+        rows: usize,
+        cols: usize,
+    ) Error!void {
+        if (matrix.len < rows * cols) return error.InvalidInputBuffer;
+        if (vector.len < cols) return error.InvalidInputBuffer;
+        if (output.len < rows) return error.OutputBufferTooSmall;
+        try dispatchDenseMatVec(
+            &self.session,
+            &self.pipeline,
+            matrix.object,
+            vector.object,
+            output.object,
+            rows,
+            cols,
+        );
+    }
+};
+
 pub const Error = std.DynLib.Error || error{
     MissingSymbol,
     UnsupportedPlatform,
@@ -135,6 +202,8 @@ pub const Error = std.DynLib.Error || error{
     InvalidElementCount,
     InvalidRowCount,
     InvalidColCount,
+    InvalidInputBuffer,
+    OutputBufferTooSmall,
     ClockGetTimeFailed,
     ClockOutOfRange,
 };
@@ -180,15 +249,14 @@ const Session = struct {
 };
 
 const Pipeline = struct {
-    symbols: *const Symbols,
     function: Id,
     object: Id,
     thread_execution_width: usize,
     max_total_threads_per_threadgroup: usize,
 
-    fn deinit(self: *Pipeline) void {
-        release(self.symbols, self.object);
-        release(self.symbols, self.function);
+    fn deinit(self: *Pipeline, symbols: *const Symbols) void {
+        release(symbols, self.object);
+        release(symbols, self.function);
     }
 };
 
@@ -198,7 +266,7 @@ pub fn runBootstrap(allocator: std.mem.Allocator) Error!Report {
     var session = try createSession();
     defer session.deinit();
     var pipeline = try createPipeline(&session, "add_one");
-    defer pipeline.deinit();
+    defer pipeline.deinit(&session.symbols);
 
     const buffer = try allocateSharedBuffer(&session, DemoValues.len);
     defer release(&session.symbols, buffer.object);
@@ -239,7 +307,7 @@ pub fn runBenchmark(
     var session = try createSession();
     defer session.deinit();
     var pipeline = try createPipeline(&session, "add_one");
-    defer pipeline.deinit();
+    defer pipeline.deinit(&session.symbols);
 
     const buffer = try allocateSharedBuffer(&session, element_count);
     defer release(&session.symbols, buffer.object);
@@ -299,7 +367,7 @@ pub fn runMatVecBenchmark(
     var session = try createSession();
     defer session.deinit();
     var pipeline = try createPipeline(&session, "dense_matvec_f32");
-    defer pipeline.deinit();
+    defer pipeline.deinit(&session.symbols);
 
     const matrix = try allocateSharedBuffer(&session, matrix_count);
     defer release(&session.symbols, matrix.object);
@@ -409,7 +477,6 @@ fn createPipeline(session: *Session, function_name: [:0]const u8) Error!Pipeline
     errdefer release(&session.symbols, pipeline);
 
     return .{
-        .symbols = &session.symbols,
         .function = function,
         .object = pipeline,
         .thread_execution_width = session.symbols.msg_send_usize_0(pipeline, sel(&session.symbols, "threadExecutionWidth")),

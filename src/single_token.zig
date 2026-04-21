@@ -1,6 +1,7 @@
 const std = @import("std");
 const gguf = @import("gguf.zig");
 const gguf_store = @import("gguf_store.zig");
+const metal_backend = @import("metal_backend.zig");
 const ops = @import("ops.zig");
 const parallel_rows = @import("parallel_rows.zig");
 
@@ -168,16 +169,19 @@ const Scratch = struct {
 pub const Engine = struct {
     allocator: std.mem.Allocator,
     store: *const gguf_store.Store,
+    backend: ?*metal_backend.Backend,
     hparams: HParams,
     token_embd: gguf_store.TensorView,
     output_norm: gguf_store.TensorView,
     output: gguf_store.TensorView,
     layers: []LayerWeights,
     scratch: Scratch,
+    output_logits: ?[]f32,
 
     pub fn init(
         allocator: std.mem.Allocator,
         store: *const gguf_store.Store,
+        backend: ?*metal_backend.Backend,
     ) !Engine {
         const hparams = try HParams.load(&store.parsed);
         const layers = try allocator.alloc(LayerWeights, hparams.n_layers);
@@ -191,16 +195,20 @@ pub const Engine = struct {
             var scratch_copy = scratch;
             scratch_copy.deinit(allocator);
         }
+        const output_logits = if (backend != null) try allocator.alloc(f32, output.row_count) else null;
+        errdefer if (output_logits) |logits| allocator.free(logits);
 
         var engine = Engine{
             .allocator = allocator,
             .store = store,
+            .backend = backend,
             .hparams = hparams,
             .token_embd = token_embd,
             .output_norm = output_norm,
             .output = output,
             .layers = layers,
             .scratch = scratch,
+            .output_logits = output_logits,
         };
 
         for (0..hparams.n_layers) |layer_idx| {
@@ -211,6 +219,7 @@ pub const Engine = struct {
     }
 
     pub fn deinit(self: *Engine) void {
+        if (self.output_logits) |logits| self.allocator.free(logits);
         self.scratch.deinit(self.allocator);
         self.allocator.free(self.layers);
         self.* = undefined;
@@ -366,9 +375,9 @@ pub const Engine = struct {
         const v_len = head_v_dim * num_v_heads;
         const qkv_len = v_offset + v_len;
 
-        try projectAllRows(weights.qkv, input, self.scratch.wide0[0..qkv_len]);
-        try projectAllRows(weights.gate, input, self.scratch.wide1[0..v_len]);
-        try projectAllRows(weights.beta, input, self.scratch.small32[0..num_v_heads]);
+        try projectAllRows(self.backend, weights.qkv, input, self.scratch.wide0[0..qkv_len]);
+        try projectAllRows(self.backend, weights.gate, input, self.scratch.wide1[0..v_len]);
+        try projectAllRows(self.backend, weights.beta, input, self.scratch.small32[0..num_v_heads]);
 
         for (self.scratch.small32[0..num_v_heads]) |*value| {
             value.* = sigmoid(value.*);
@@ -419,7 +428,7 @@ pub const Engine = struct {
             value.* *= silu(gate);
         }
 
-        try projectAllRows(weights.out, self.scratch.wide0[0..v_len], out_hidden);
+        try projectAllRows(self.backend, weights.out, self.scratch.wide0[0..v_len], out_hidden);
     }
 
     fn runFullAttention(
@@ -436,7 +445,7 @@ pub const Engine = struct {
         const v_len = num_kv_heads * head_dim;
 
         try projectInterleavedGate(weights.q_gate, input, num_heads, head_dim, self.scratch.wide1[0..gate_len]);
-        try projectAllRows(weights.v, input, self.scratch.wide2[0..v_len]);
+        try projectAllRows(self.backend, weights.v, input, self.scratch.wide2[0..v_len]);
 
         for (0..num_heads) |head_idx| {
             const kv_head = head_idx / group_size;
@@ -449,7 +458,7 @@ pub const Engine = struct {
             }
         }
 
-        try projectAllRows(weights.out, self.scratch.wide0[0..gate_len], out_hidden);
+        try projectAllRows(self.backend, weights.out, self.scratch.wide0[0..gate_len], out_hidden);
     }
 
     fn runFfn(
@@ -463,7 +472,7 @@ pub const Engine = struct {
         const expert_ff = self.hparams.expert_ffn_len;
         const shared_ff = self.hparams.expert_shared_ffn_len;
 
-        try projectAllRows(weights.gate_inp, input, self.scratch.router_logits);
+        try projectAllRows(self.backend, weights.gate_inp, input, self.scratch.router_logits);
         selectTopK(
             self.scratch.router_logits,
             self.scratch.selected_indices,
@@ -516,12 +525,28 @@ pub const Engine = struct {
         top_out: []OutputCandidate,
     ) !RunResult {
         if (top_out.len == 0) {
+            if (self.backend) |backend| {
+                if (self.output_logits) |logits| {
+                    if (try backend.projectAllRows(self.output, hidden, logits)) {
+                        return scanProjectedOutput(logits, top_out);
+                    }
+                }
+            }
+
             const best = try parallel_rows.argmaxRows(self.output, hidden);
             return .{
                 .argmax_token_id = best.row_index,
                 .argmax_logit = best.value,
                 .top_count = 0,
             };
+        }
+
+        if (self.backend) |backend| {
+            if (self.output_logits) |logits| {
+                if (try backend.projectAllRows(self.output, hidden, logits)) {
+                    return scanProjectedOutput(logits, top_out);
+                }
+            }
         }
 
         var argmax_token_id: usize = 0;
@@ -585,12 +610,44 @@ fn loadWeightRow(tensor: gguf_store.TensorView, out: []f32) !void {
 }
 
 fn projectAllRows(
+    backend: ?*metal_backend.Backend,
     tensor: gguf_store.TensorView,
     input: []const f32,
     out: []f32,
 ) !void {
     if (out.len < tensor.row_count) return error.OutputBufferTooSmall;
+    if (backend) |metal| {
+        if (try metal.projectAllRows(tensor, input, out)) return;
+    }
     try parallel_rows.matvecRows(tensor, input, 0, tensor.row_count, out);
+}
+
+fn scanProjectedOutput(
+    logits: []const f32,
+    top_out: []OutputCandidate,
+) RunResult {
+    var argmax_token_id: usize = 0;
+    var argmax_logit = -std.math.inf(f32);
+    initCandidates(top_out);
+
+    for (logits, 0..) |logit, token_idx| {
+        if (logit > argmax_logit) {
+            argmax_logit = logit;
+            argmax_token_id = token_idx;
+        }
+        if (top_out.len != 0) {
+            insertCandidate(top_out, .{
+                .token_id = token_idx,
+                .logit = logit,
+            });
+        }
+    }
+
+    return .{
+        .argmax_token_id = argmax_token_id,
+        .argmax_logit = argmax_logit,
+        .top_count = countCandidates(top_out),
+    };
 }
 
 fn projectInterleavedGate(
