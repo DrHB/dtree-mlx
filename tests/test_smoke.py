@@ -38,9 +38,9 @@ def test_generator_is_callable_class():
 
 
 def test_cli_entrypoints_importable():
-    from dtree_mlx import benchmark_cli, cli, compare_cli
+    from dtree_mlx import benchmark_cli, cli, compare_cli, qwen36_compare_cli
 
-    for module in (cli, benchmark_cli, compare_cli):
+    for module in (cli, benchmark_cli, compare_cli, qwen36_compare_cli):
         assert callable(module.main)
 
 
