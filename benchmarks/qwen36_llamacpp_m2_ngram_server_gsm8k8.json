@@ -1,0 +1,118 @@
+{
+  "config": {
+    "cache_type_k": "q8_0",
+    "cache_type_v": "q8_0",
+    "ctx_checkpoints": 128,
+    "ctx_size": 8192,
+    "dataset": "gsm8k",
+    "draft_max": 48,
+    "draft_min": 12,
+    "llama_server_version": "b8890-8bccdbbff",
+    "max_new_tokens": 256,
+    "mode": "server_ngram_mod_checkpoints_chat_prompt",
+    "num_prompts": 8,
+    "prompt_format": "manual_qwen_chat_template",
+    "server": "http://127.0.0.1:18080/completion",
+    "spec_ngram_size_n": 24,
+    "spec_type": "ngram-mod",
+    "target": "models/qwen3.6-27b-q4km/Qwen_Qwen3.6-27B-Q4_K_M.gguf",
+    "warmup_prompts": 2
+  },
+  "runs": [
+    {
+      "content_head": "Here's a thinking process that leads to the solution:\n\n1.  **Analyze the Request:**\n    *   **Action:** Josh flips a house.\n    *   **Initial Cost (Purchase Pri",
+      "generated_tokens": 256,
+      "generation_tps": 7.762728327311559,
+      "prompt_index": 1,
+      "prompt_tokens": 83,
+      "prompt_tps": 61.263383835028776,
+      "server_predicted_ms": 32978.096,
+      "server_prompt_ms": 1354.806,
+      "wall_time_s": 34.393251958012115
+    },
+    {
+      "content_head": "Here's a thinking process that leads to the solution:\n\n1.  **Analyze the Request:**\n    *   **Activity:** Running sprints.\n    *   **Frequency:** 3 times a week",
+      "generated_tokens": 256,
+      "generation_tps": 8.247446593756232,
+      "prompt_index": 2,
+      "prompt_tokens": 61,
+      "prompt_tps": 58.19050426364687,
+      "server_predicted_ms": 31039.91,
+      "server_prompt_ms": 1048.281,
+      "wall_time_s": 32.21578995801974
+    },
+    {
+      "content_head": "Here's a thinking process that leads to the solution:\n\n1.  **Analyze the Request:**\n    *   **Goal:** Determine the amount of feed needed for the final meal of ",
+      "generated_tokens": 256,
+      "generation_tps": 7.805378973254229,
+      "prompt_index": 3,
+      "prompt_tokens": 137,
+      "prompt_tps": 63.993064459700015,
+      "server_predicted_ms": 32797.895,
+      "server_prompt_ms": 2140.857,
+      "wall_time_s": 35.000800082983915
+    },
+    {
+      "content_head": "Here's a thinking process that leads to the solution:\n\n1.  **Analyze the Problem:**\n    *   **Item:** Glasses.\n    *   **Base Price:** $5 per glass.\n    *   **D",
+      "generated_tokens": 256,
+      "generation_tps": 7.672240909323582,
+      "prompt_index": 4,
+      "prompt_tokens": 81,
+      "prompt_tps": 61.17076309394167,
+      "server_predicted_ms": 33367.044,
+      "server_prompt_ms": 1324.162,
+      "wall_time_s": 34.80666212498909
+    },
+    {
+      "content_head": "Here's a thinking process:\n\n1.  **Analyze User Input:**\n   - Toulouse has twice as many sheep as Charleston.\n   - Charleston has 4 times as many sheep as Seattl",
+      "generated_tokens": 256,
+      "generation_tps": 7.439868137637096,
+      "prompt_index": 5,
+      "prompt_tokens": 67,
+      "prompt_tps": 67.56014113010974,
+      "server_predicted_ms": 34409.212,
+      "server_prompt_ms": 991.709,
+      "wall_time_s": 35.57093462505145
+    },
+    {
+      "content_head": "Here's a thinking process that leads to the solution:\n\n1.  **Analyze the Problem:**\n    *   **File Size:** 200 GB.\n    *   **Download Speed:** 2 GB/minute.\n    ",
+      "generated_tokens": 256,
+      "generation_tps": 7.442697552233418,
+      "prompt_index": 6,
+      "prompt_tokens": 96,
+      "prompt_tps": 74.61775887115766,
+      "server_predicted_ms": 34396.131,
+      "server_prompt_ms": 1286.557,
+      "wall_time_s": 35.89113924995763
+    },
+    {
+      "content_head": "Here's a thinking process that leads to the solution:\n\n1.  **Analyze the Request:**\n    *   **Initial Trip:** John drives away from home for 3 hours at 60 mph.\n",
+      "generated_tokens": 256,
+      "generation_tps": 7.935867772571173,
+      "prompt_index": 7,
+      "prompt_tokens": 130,
+      "prompt_tps": 77.03178746337286,
+      "server_predicted_ms": 32258.602,
+      "server_prompt_ms": 1687.615,
+      "wall_time_s": 34.03967491700314
+    },
+    {
+      "content_head": "Here's a thinking process that leads to the solution:\n\n1.  **Analyze the Request:**\n    *   **Subject:** Eliza's earnings.\n    *   **Regular Rate:** $10 per hou",
+      "generated_tokens": 256,
+      "generation_tps": 8.367208270174801,
+      "prompt_index": 8,
+      "prompt_tokens": 86,
+      "prompt_tps": 64.5717392022537,
+      "server_predicted_ms": 30595.629,
+      "server_prompt_ms": 1331.852,
+      "wall_time_s": 32.1094753749785
+    }
+  ],
+  "summary": {
+    "end_to_end_tps_mean": 7.485211734927367,
+    "generation_tps_max": 8.367208270174801,
+    "generation_tps_mean": 7.834179567032761,
+    "prompt_tps_mean": 66.0498927899014,
+    "runs": 8
+  }
+}
